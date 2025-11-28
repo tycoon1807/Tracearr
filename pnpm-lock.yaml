@@ -62,6 +62,9 @@ importers:
       dotenv:
         specifier: ^16.4.1
         version: 16.6.1
+      drizzle-orm:
+        specifier: ^0.44.7
+        version: 0.44.7(@types/pg@8.15.6)(pg@8.16.3)
       fastify:
         specifier: ^4.26.0
         version: 4.29.1
@@ -93,9 +96,6 @@ importers:
       drizzle-kit:
         specifier: ^0.31.7
         version: 0.31.7
-      drizzle-orm:
-        specifier: ^0.44.7
-        version: 0.44.7(@types/pg@8.15.6)(pg@8.16.3)
       pino-pretty:
         specifier: ^13.1.2
         version: 13.1.2
