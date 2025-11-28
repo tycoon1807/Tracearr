@@ -64,13 +64,31 @@ export function useSyncServer() {
 
   return useMutation({
     mutationFn: (id: string) => api.servers.sync(id),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['servers', 'list'] });
       queryClient.invalidateQueries({ queryKey: ['users', 'list'] });
+
+      // Show detailed results
+      const parts: string[] = [];
+      if (data.usersAdded > 0) parts.push(`${data.usersAdded} users added`);
+      if (data.usersUpdated > 0) parts.push(`${data.usersUpdated} users updated`);
+      if (data.librariesSynced > 0) parts.push(`${data.librariesSynced} libraries`);
+      if (data.errors.length > 0) parts.push(`${data.errors.length} errors`);
+
+      const description = parts.length > 0
+        ? parts.join(', ')
+        : 'No changes detected';
+
       toast({
-        title: 'Server Synced',
-        description: 'Server data has been synchronized.',
+        title: data.success ? 'Server Synced' : 'Sync Completed with Errors',
+        description,
+        variant: data.errors.length > 0 ? 'destructive' : 'default',
       });
+
+      // Log errors to console for debugging
+      if (data.errors.length > 0) {
+        console.error('Sync errors:', data.errors);
+      }
     },
     onError: (error: Error) => {
       toast({

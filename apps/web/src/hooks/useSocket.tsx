@@ -19,6 +19,7 @@ import type {
 import { WS_EVENTS } from '@tracearr/shared';
 import { useAuth } from './useAuth';
 import { useToast } from './use-toast';
+import { tokenStorage } from '@/lib/api';
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -48,7 +49,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Create socket connection
+    // Get JWT token for authentication
+    const token = tokenStorage.getAccessToken();
+    if (!token) {
+      console.log('[Socket] No token available, skipping connection');
+      return;
+    }
+
+    // Create socket connection with auth token
     const newSocket: TypedSocket = io({
       path: '/socket.io',
       withCredentials: true,
@@ -56,6 +64,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
+      auth: {
+        token,
+      },
     });
 
     newSocket.on('connect', () => {
@@ -74,14 +85,17 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     // Handle real-time events
     newSocket.on(WS_EVENTS.SESSION_STARTED as 'session:started', (session: ActiveSession) => {
-      // Update active sessions query
+      // Update active sessions query (check for duplicates)
       queryClient.setQueryData<ActiveSession[]>(['sessions', 'active'], (old) => {
         if (!old) return [session];
+        // Don't add if already exists
+        if (old.some((s) => s.id === session.id)) return old;
         return [...old, session];
       });
 
-      // Invalidate dashboard stats
+      // Invalidate dashboard stats and session history
       queryClient.invalidateQueries({ queryKey: ['stats', 'dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['sessions', 'list'] });
 
       toast({
         title: 'New Stream Started',
@@ -96,8 +110,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         return old.filter((s) => s.id !== sessionId);
       });
 
-      // Invalidate dashboard stats
+      // Invalidate dashboard stats and session history (stopped session now has duration)
       queryClient.invalidateQueries({ queryKey: ['stats', 'dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['sessions', 'list'] });
     });
 
     newSocket.on(WS_EVENTS.SESSION_UPDATED as 'session:updated', (session: ActiveSession) => {

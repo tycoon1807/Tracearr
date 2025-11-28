@@ -6,8 +6,8 @@ import {
   type ReactNode,
 } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { User, AuthUser } from '@tracearr/shared';
-import { api } from '@/lib/api';
+import type { AuthUser } from '@tracearr/shared';
+import { api, tokenStorage } from '@/lib/api';
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -29,16 +29,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   } = useQuery({
     queryKey: ['auth', 'me'],
     queryFn: async () => {
+      // Don't even try if no token
+      if (!tokenStorage.getAccessToken()) {
+        return null;
+      }
       try {
         const user = await api.auth.me();
-        // Transform User to AuthUser format
+        // The /auth/me endpoint returns the right shape
         return {
-          userId: user.id,
+          userId: user.userId ?? user.id,
           username: user.username,
-          role: user.isOwner ? 'owner' : 'guest',
-          serverIds: [user.serverId],
+          role: user.role ?? (user.isOwner ? 'owner' : 'guest'),
+          serverIds: user.serverIds ?? [user.serverId],
         } as AuthUser;
       } catch {
+        // Token invalid, clear it
+        tokenStorage.clearTokens();
         return null;
       }
     },
@@ -47,7 +53,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const logoutMutation = useMutation({
-    mutationFn: api.auth.logout,
+    mutationFn: async () => {
+      try {
+        await api.auth.logout();
+      } finally {
+        tokenStorage.clearTokens();
+      }
+    },
     onSuccess: () => {
       queryClient.setQueryData(['auth', 'me'], null);
       queryClient.clear();

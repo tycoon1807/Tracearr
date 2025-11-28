@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { Session, ActiveSession, PaginatedResponse } from '@tracearr/shared';
+import type { SessionWithDetails, ActiveSession, PaginatedResponse } from '@tracearr/shared';
 import { api } from '@/lib/api';
 
 interface SessionsParams {
