@@ -23,11 +23,11 @@ const navigation = [
 
 export function Sidebar() {
   return (
-    <aside className="flex w-64 flex-col border-r bg-card">
-      <div className="flex h-16 items-center border-b px-6">
+    <aside className="flex w-64 shrink-0 flex-col border-r bg-card">
+      <div className="flex h-16 shrink-0 items-center border-b px-6">
         <Logo size="md" />
       </div>
-      <nav className="flex-1 space-y-1 p-4">
+      <nav className="flex-1 space-y-1 overflow-auto p-4">
         {navigation.map((item) => (
           <NavLink
             key={item.name}

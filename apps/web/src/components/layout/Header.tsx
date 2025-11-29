@@ -10,7 +10,7 @@ import {
 
 export function Header() {
   return (
-    <header className="flex h-16 items-center justify-between border-b px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b px-6">
       <div>{/* Breadcrumb or page title could go here */}</div>
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon">
