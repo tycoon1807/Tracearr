@@ -47,6 +47,7 @@ import { createCacheService, createPubSubService } from './services/cache.js';
 import { initializePoller, startPoller, stopPoller } from './jobs/poller.js';
 import { initializeWebSocket, broadcastToSessions } from './websocket/index.js';
 import { db, runMigrations } from './db/client.js';
+import { initTimescaleDB, getTimescaleStatus } from './db/timescale.js';
 import { sql } from 'drizzle-orm';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -71,6 +72,27 @@ async function buildApp() {
   } catch (err) {
     app.log.error({ err }, 'Failed to run database migrations');
     throw err;
+  }
+
+  // Initialize TimescaleDB features (hypertable, compression, aggregates)
+  try {
+    app.log.info('Initializing TimescaleDB...');
+    const tsResult = await initTimescaleDB();
+    for (const action of tsResult.actions) {
+      app.log.info(`  TimescaleDB: ${action}`);
+    }
+    if (tsResult.status.sessionsIsHypertable) {
+      app.log.info(
+        `TimescaleDB ready: ${tsResult.status.chunkCount} chunks, ` +
+          `compression=${tsResult.status.compressionEnabled}, ` +
+          `aggregates=${tsResult.status.continuousAggregates.length}`
+      );
+    } else if (!tsResult.status.extensionInstalled) {
+      app.log.warn('TimescaleDB extension not installed - running without time-series optimization');
+    }
+  } catch (err) {
+    app.log.error({ err }, 'Failed to initialize TimescaleDB - continuing without optimization');
+    // Don't throw - app can still work without TimescaleDB features
   }
 
   // Initialize encryption
@@ -154,12 +176,28 @@ async function buildApp() {
       redisHealthy = false;
     }
 
+    // Check TimescaleDB status
+    let timescale = null;
+    try {
+      const tsStatus = await getTimescaleStatus();
+      timescale = {
+        installed: tsStatus.extensionInstalled,
+        hypertable: tsStatus.sessionsIsHypertable,
+        compression: tsStatus.compressionEnabled,
+        aggregates: tsStatus.continuousAggregates.length,
+        chunks: tsStatus.chunkCount,
+      };
+    } catch {
+      timescale = { installed: false, hypertable: false, compression: false, aggregates: 0, chunks: 0 };
+    }
+
     return {
       status: dbHealthy && redisHealthy && isEncryptionInitialized() ? 'ok' : 'degraded',
       db: dbHealthy,
       redis: redisHealthy,
       encryption: isEncryptionInitialized(),
       geoip: geoipService.hasDatabase(),
+      timescale,
     };
   });
 
