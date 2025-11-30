@@ -1,0 +1,40 @@
+# Dependencies - will be installed fresh in container
+node_modules
+.pnpm-store
+
+# Turbo cache - not needed in Docker build
+.turbo
+
+# Git
+.git
+.gitignore
+
+# IDE and editor files
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+
+# Testing artifacts
+coverage
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment files - should be provided at runtime
+.env
+.env.local
+.env.*.local
+
+# Docker files (avoid recursion)
+docker-compose*.yml
+.dockerignore
+
+# Documentation (not needed in image)
+docs/
+
+# CI/CD
+.github/
