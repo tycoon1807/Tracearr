@@ -9,21 +9,19 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { MapPin, RotateCcw } from 'lucide-react';
-import { useLocationStats, useUsers, useServers } from '@/hooks/queries';
+import { X } from 'lucide-react';
+import { useLocationStats } from '@/hooks/queries';
 
-const TIME_RANGE_OPTIONS = [
-  { value: '7', label: 'Last 7 days' },
-  { value: '30', label: 'Last 30 days' },
-  { value: '90', label: 'Last 90 days' },
+const TIME_RANGES = [
+  { value: '7', label: '7 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
   { value: '365', label: 'All time' },
 ] as const;
 
-const MEDIA_TYPE_OPTIONS = [
-  { value: 'all', label: 'All types' },
+const MEDIA_TYPES = [
   { value: 'movie', label: 'Movies' },
-  { value: 'episode', label: 'TV Shows' },
+  { value: 'episode', label: 'TV' },
   { value: 'track', label: 'Music' },
 ] as const;
 
@@ -31,78 +29,99 @@ export function Map() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Parse filters from URL
-  const filters = useMemo(() => ({
-    days: Number(searchParams.get('days')) || 30,
-    userId: searchParams.get('userId') || undefined,
-    serverId: searchParams.get('serverId') || undefined,
-    mediaType: (searchParams.get('mediaType') as 'movie' | 'episode' | 'track') || undefined,
-  }), [searchParams]);
+  const filters = useMemo(() => {
+    const days = searchParams.get('days');
+    const userId = searchParams.get('userId');
+    const serverId = searchParams.get('serverId');
+    const mediaType = searchParams.get('mediaType') as 'movie' | 'episode' | 'track' | null;
 
-  // Fetch data
-  const { data: locationData, isLoading } = useLocationStats(filters);
-  const { data: usersData } = useUsers({ pageSize: 100 });
-  const { data: serversData } = useServers();
+    return {
+      days: days ? Number(days) : 30,
+      userId: userId || undefined,
+      serverId: serverId || undefined,
+      mediaType: mediaType || undefined,
+    };
+  }, [searchParams]);
 
-  const users = usersData?.data ?? [];
-  const servers = serversData ?? [];
+  // Fetch data - includes available filter options based on current filters
+  const { data: locationData, isLoading: locationsLoading } = useLocationStats(filters);
+
   const locations = locationData?.data ?? [];
   const summary = locationData?.summary;
+  const availableFilters = locationData?.availableFilters;
 
-  // Check if any filters are active
-  const hasActiveFilters = filters.userId || filters.serverId || filters.mediaType || filters.days !== 30;
+  // Dynamic filter options from the response
+  const users = availableFilters?.users ?? [];
+  const servers = availableFilters?.servers ?? [];
+  const mediaTypes = availableFilters?.mediaTypes ?? [];
 
-  // Update filter in URL
-  const updateFilter = (key: string, value: string | undefined) => {
-    const newParams = new URLSearchParams(searchParams);
-    if (value && value !== 'all') {
-      newParams.set(key, value);
+  // Get selected filter labels for display
+  const selectedUser = users.find(u => u.id === filters.userId);
+  const selectedServer = servers.find(s => s.id === filters.serverId);
+  const selectedTimeRange = TIME_RANGES.find(t => t.value === String(filters.days));
+  const selectedMediaType = MEDIA_TYPES.find(m => m.value === filters.mediaType);
+
+  // Filter MEDIA_TYPES to only show available options
+  const availableMediaTypeOptions = MEDIA_TYPES.filter(m => mediaTypes.includes(m.value));
+
+  // Update a single filter
+  const setFilter = (key: string, value: string | null) => {
+    const params = new URLSearchParams(searchParams);
+    if (value) {
+      params.set(key, value);
     } else {
-      newParams.delete(key);
+      params.delete(key);
     }
-    setSearchParams(newParams);
+    setSearchParams(params);
   };
 
-  // Reset all filters
-  const resetFilters = () => {
+  // Clear all filters
+  const clearFilters = () => {
     setSearchParams(new URLSearchParams());
   };
 
-  // Build context label for stats card
-  const contextLabel = useMemo(() => {
+  const hasFilters = filters.userId || filters.serverId || filters.mediaType || filters.days !== 30;
+
+  // Build summary text
+  const summaryContext = useMemo(() => {
     const parts: string[] = [];
-
-    if (filters.userId) {
-      const user = users.find(u => u.id === filters.userId);
-      if (user) parts.push(user.username);
-    }
-
-    if (filters.serverId) {
-      const server = servers.find(s => s.id === filters.serverId);
-      if (server) parts.push(server.name);
-    }
-
-    if (filters.mediaType) {
-      const label = MEDIA_TYPE_OPTIONS.find(o => o.value === filters.mediaType)?.label;
-      if (label) parts.push(label);
-    }
-
-    return parts.length > 0 ? parts.join(' · ') : null;
-  }, [filters, users, servers]);
+    if (selectedUser) parts.push(selectedUser.username);
+    if (selectedServer) parts.push(selectedServer.name);
+    if (selectedMediaType) parts.push(selectedMediaType.label);
+    return parts.join(' · ') || 'All activity';
+  }, [selectedUser, selectedServer, selectedMediaType]);
 
   return (
-    <div className="relative h-[calc(100vh-4rem)]">
+    <div className="-m-6 flex h-[calc(100vh-4rem)] flex-col">
       {/* Filter bar */}
-      <div className="absolute left-4 right-4 top-4 z-[1000] flex items-center gap-2 rounded-lg border bg-card/95 p-2 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div className="relative z-[1000] flex items-center gap-3 border-b bg-card/50 px-4 py-2 backdrop-blur">
+        {/* Time range */}
+        <Select
+          value={String(filters.days)}
+          onValueChange={(v) => setFilter('days', v === '30' ? null : v)}
+        >
+          <SelectTrigger className="w-[100px] h-8 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="z-[1001]">
+            {TIME_RANGES.map((t) => (
+              <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <div className="h-4 w-px bg-border" />
+
         {/* User filter */}
         <Select
-          value={filters.userId ?? 'all'}
-          onValueChange={(value) => updateFilter('userId', value === 'all' ? undefined : value)}
+          value={filters.userId ?? '_all'}
+          onValueChange={(v) => setFilter('userId', v === '_all' ? null : v)}
         >
-          <SelectTrigger className="w-[160px] bg-background">
+          <SelectTrigger className="w-[140px] h-8 text-sm">
             <SelectValue placeholder="All users" />
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All users</SelectItem>
+          <SelectContent className="z-[1001]">
+            <SelectItem value="_all">All users</SelectItem>
             {users.map((user) => (
               <SelectItem key={user.id} value={user.id}>
                 {user.username}
@@ -113,14 +132,14 @@ export function Map() {
 
         {/* Server filter */}
         <Select
-          value={filters.serverId ?? 'all'}
-          onValueChange={(value) => updateFilter('serverId', value === 'all' ? undefined : value)}
+          value={filters.serverId ?? '_all'}
+          onValueChange={(v) => setFilter('serverId', v === '_all' ? null : v)}
         >
-          <SelectTrigger className="w-[160px] bg-background">
+          <SelectTrigger className="w-[140px] h-8 text-sm">
             <SelectValue placeholder="All servers" />
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All servers</SelectItem>
+          <SelectContent className="z-[1001]">
+            <SelectItem value="_all">All servers</SelectItem>
             {servers.map((server) => (
               <SelectItem key={server.id} value={server.id}>
                 {server.name}
@@ -131,82 +150,58 @@ export function Map() {
 
         {/* Media type filter */}
         <Select
-          value={filters.mediaType ?? 'all'}
-          onValueChange={(value) => updateFilter('mediaType', value === 'all' ? undefined : value)}
+          value={filters.mediaType ?? '_all'}
+          onValueChange={(v) => setFilter('mediaType', v === '_all' ? null : v)}
         >
-          <SelectTrigger className="w-[140px] bg-background">
+          <SelectTrigger className="w-[100px] h-8 text-sm">
             <SelectValue placeholder="All types" />
           </SelectTrigger>
-          <SelectContent>
-            {MEDIA_TYPE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
+          <SelectContent className="z-[1001]">
+            <SelectItem value="_all">All types</SelectItem>
+            {availableMediaTypeOptions.map((m) => (
+              <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        {/* Time range filter */}
-        <Select
-          value={String(filters.days)}
-          onValueChange={(value) => updateFilter('days', value === '30' ? undefined : value)}
-        >
-          <SelectTrigger className="w-[140px] bg-background">
-            <SelectValue placeholder="Last 30 days" />
-          </SelectTrigger>
-          <SelectContent>
-            {TIME_RANGE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {/* Reset button */}
-        {hasActiveFilters && (
-          <Button variant="ghost" size="sm" onClick={resetFilters} className="ml-auto">
-            <RotateCcw className="mr-2 h-4 w-4" />
-            Reset
+        {hasFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearFilters}
+            className="h-8 px-2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
           </Button>
         )}
+
+        {/* Summary stats - right side */}
+        <div className="ml-auto flex items-center gap-4 text-sm">
+          <div className="text-muted-foreground">
+            {summaryContext}
+          </div>
+          <div className="flex items-center gap-3">
+            <div>
+              <span className="font-semibold tabular-nums">{summary?.totalStreams ?? 0}</span>
+              <span className="ml-1 text-muted-foreground">streams</span>
+            </div>
+            <div className="h-4 w-px bg-border" />
+            <div>
+              <span className="font-semibold tabular-nums">{summary?.uniqueLocations ?? 0}</span>
+              <span className="ml-1 text-muted-foreground">locations</span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Stats overlay card */}
-      <Card className="absolute bottom-6 left-4 z-[1000] w-[200px] bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
-        <CardContent className="p-4">
-          {contextLabel && (
-            <p className="mb-2 text-xs font-medium text-muted-foreground truncate">
-              {contextLabel}
-            </p>
-          )}
-
-          <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold tabular-nums">
-              {summary?.totalStreams ?? 0}
-            </span>
-            <span className="text-sm text-muted-foreground">streams</span>
-          </div>
-
-          <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-            <MapPin className="h-3.5 w-3.5" />
-            <span>{summary?.uniqueLocations ?? 0} locations</span>
-          </div>
-
-          {summary?.topCity && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Top: {summary.topCity}
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Full-height map */}
-      <StreamMap
-        locations={locations}
-        isLoading={isLoading}
-        className="h-full"
-      />
+      {/* Map */}
+      <div className="relative flex-1">
+        <StreamMap
+          locations={locations}
+          totalStreams={summary?.totalStreams ?? 0}
+          isLoading={locationsLoading}
+        />
+      </div>
     </div>
   );
 }
