@@ -8,7 +8,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, sql, gte, desc, and, isNotNull } from 'drizzle-orm';
+import { sql, gte, desc, and, isNotNull } from 'drizzle-orm';
 import {
   statsQuerySchema,
   REDIS_KEYS,
@@ -16,7 +16,7 @@ import {
   type ActiveSession,
 } from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { sessions, users, violations } from '../db/schema.js';
+import { sessions, violations } from '../db/schema.js';
 import { getTimescaleStatus } from '../db/timescale.js';
 
 // Cache whether aggregates are available (checked once at startup)
@@ -87,8 +87,9 @@ export const statsRoutes: FastifyPluginAsync = async (app) => {
       todayStart.setHours(0, 0, 0, 0);
       const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
+      // Count unique plays (grouped by reference_id, or standalone if no reference)
       const todayPlaysResult = await db
-        .select({ count: sql<number>`count(*)::int` })
+        .select({ count: sql<number>`count(DISTINCT COALESCE(reference_id, id))::int` })
         .from(sessions)
         .where(gte(sessions.startedAt, todayStart));
       const todayPlays = todayPlaysResult[0]?.count ?? 0;
@@ -140,33 +141,18 @@ export const statsRoutes: FastifyPluginAsync = async (app) => {
       const { period } = query.data;
       const startDate = getDateRange(period);
 
-      let playsByDate: { date: string; count: number }[];
-
-      if (await hasAggregates()) {
-        // Use continuous aggregate - much faster for large datasets
-        const result = await db.execute(sql`
-          SELECT
-            day::date::text as date,
-            SUM(play_count)::int as count
-          FROM daily_plays_by_user
-          WHERE day >= ${startDate}
-          GROUP BY day
-          ORDER BY day
-        `);
-        playsByDate = result.rows as { date: string; count: number }[];
-      } else {
-        // Fallback to raw sessions query
-        const result = await db
-          .select({
-            date: sql<string>`date_trunc('day', started_at)::date::text`,
-            count: sql<number>`count(*)::int`,
-          })
-          .from(sessions)
-          .where(gte(sessions.startedAt, startDate))
-          .groupBy(sql`date_trunc('day', started_at)`)
-          .orderBy(sql`date_trunc('day', started_at)`);
-        playsByDate = result;
-      }
+      // Note: Continuous aggregates use COUNT(*) which counts sessions, not unique plays.
+      // For accurate play counts, we use raw query with DISTINCT COALESCE(reference_id, id).
+      // TODO: Recreate continuous aggregates with proper grouping for better performance.
+      const playsByDate = await db
+        .select({
+          date: sql<string>`date_trunc('day', started_at)::date::text`,
+          count: sql<number>`count(DISTINCT COALESCE(reference_id, id))::int`,
+        })
+        .from(sessions)
+        .where(gte(sessions.startedAt, startDate))
+        .groupBy(sql`date_trunc('day', started_at)`)
+        .orderBy(sql`date_trunc('day', started_at)`);
 
       return { data: playsByDate };
     }
@@ -187,68 +173,33 @@ export const statsRoutes: FastifyPluginAsync = async (app) => {
       const { period } = query.data;
       const startDate = getDateRange(period);
 
-      let userStats: {
-        userId: string;
+      // Use raw query with proper play counting (DISTINCT reference_id)
+      const result = await db.execute(sql`
+        SELECT
+          u.id as user_id,
+          u.username,
+          u.thumb_url,
+          COUNT(DISTINCT COALESCE(s.reference_id, s.id))::int as play_count,
+          COALESCE(SUM(s.duration_ms), 0)::bigint as watch_time_ms
+        FROM users u
+        LEFT JOIN sessions s ON s.user_id = u.id AND s.started_at >= ${startDate}
+        GROUP BY u.id, u.username, u.thumb_url
+        ORDER BY play_count DESC
+        LIMIT 20
+      `);
+      const userStats = (result.rows as {
+        user_id: string;
         username: string;
-        thumbUrl: string | null;
-        playCount: number;
-        watchTimeMs: number;
-      }[];
-
-      if (await hasAggregates()) {
-        // Use continuous aggregate with user join
-        const result = await db.execute(sql`
-          SELECT
-            u.id as user_id,
-            u.username,
-            u.thumb_url,
-            COALESCE(SUM(a.play_count), 0)::int as play_count,
-            COALESCE(SUM(a.total_duration_ms), 0)::bigint as watch_time_ms
-          FROM users u
-          LEFT JOIN daily_plays_by_user a ON a.user_id = u.id AND a.day >= ${startDate}
-          GROUP BY u.id, u.username, u.thumb_url
-          ORDER BY play_count DESC
-          LIMIT 20
-        `);
-        userStats = (result.rows as {
-          user_id: string;
-          username: string;
-          thumb_url: string | null;
-          play_count: number;
-          watch_time_ms: string;
-        }[]).map((r) => ({
-          userId: r.user_id,
-          username: r.username,
-          thumbUrl: r.thumb_url,
-          playCount: r.play_count,
-          watchTimeMs: Number(r.watch_time_ms),
-        }));
-      } else {
-        // Fallback to raw sessions query
-        const result = await db
-          .select({
-            userId: users.id,
-            username: users.username,
-            thumbUrl: users.thumbUrl,
-            playCount: sql<number>`count(${sessions.id})::int`,
-            watchTimeMs: sql<number>`coalesce(sum(${sessions.durationMs}), 0)::bigint`,
-          })
-          .from(users)
-          .leftJoin(
-            sessions,
-            and(eq(sessions.userId, users.id), gte(sessions.startedAt, startDate))
-          )
-          .groupBy(users.id, users.username, users.thumbUrl)
-          .orderBy(desc(sql`count(${sessions.id})`))
-          .limit(20);
-        userStats = result.map((r) => ({
-          userId: r.userId,
-          username: r.username,
-          thumbUrl: r.thumbUrl,
-          playCount: r.playCount,
-          watchTimeMs: Number(r.watchTimeMs),
-        }));
-      }
+        thumb_url: string | null;
+        play_count: number;
+        watch_time_ms: string;
+      }[]).map((r) => ({
+        userId: r.user_id,
+        username: r.username,
+        thumbUrl: r.thumb_url,
+        playCount: r.play_count,
+        watchTimeMs: Number(r.watch_time_ms),
+      }));
 
       return {
         data: userStats.map((u) => ({
@@ -277,32 +228,16 @@ export const statsRoutes: FastifyPluginAsync = async (app) => {
       const { period } = query.data;
       const startDate = getDateRange(period);
 
-      let platformStats: { platform: string | null; count: number }[];
-
-      if (await hasAggregates()) {
-        // Use continuous aggregate
-        const result = await db.execute(sql`
-          SELECT
-            platform,
-            SUM(play_count)::int as count
-          FROM daily_plays_by_platform
-          WHERE day >= ${startDate}
-          GROUP BY platform
-          ORDER BY count DESC
-        `);
-        platformStats = result.rows as { platform: string | null; count: number }[];
-      } else {
-        // Fallback to raw sessions query
-        platformStats = await db
-          .select({
-            platform: sessions.platform,
-            count: sql<number>`count(*)::int`,
-          })
-          .from(sessions)
-          .where(gte(sessions.startedAt, startDate))
-          .groupBy(sessions.platform)
-          .orderBy(desc(sql`count(*)`));
-      }
+      // Use raw query with proper play counting
+      const platformStats = await db
+        .select({
+          platform: sessions.platform,
+          count: sql<number>`count(DISTINCT COALESCE(reference_id, id))::int`,
+        })
+        .from(sessions)
+        .where(gte(sessions.startedAt, startDate))
+        .groupBy(sessions.platform)
+        .orderBy(desc(sql`count(DISTINCT COALESCE(reference_id, id))`));
 
       return { data: platformStats };
     }
@@ -323,13 +258,14 @@ export const statsRoutes: FastifyPluginAsync = async (app) => {
       const { period } = query.data;
       const startDate = getDateRange(period);
 
+      // Count unique plays per location
       const locationStats = await db
         .select({
           city: sessions.geoCity,
           country: sessions.geoCountry,
           lat: sessions.geoLat,
           lon: sessions.geoLon,
-          count: sql<number>`count(*)::int`,
+          count: sql<number>`count(DISTINCT COALESCE(reference_id, id))::int`,
         })
         .from(sessions)
         .where(
@@ -340,7 +276,7 @@ export const statsRoutes: FastifyPluginAsync = async (app) => {
           )
         )
         .groupBy(sessions.geoCity, sessions.geoCountry, sessions.geoLat, sessions.geoLon)
-        .orderBy(desc(sql`count(*)`))
+        .orderBy(desc(sql`count(DISTINCT COALESCE(reference_id, id))`))
         .limit(100);
 
       return { data: locationStats };
@@ -423,17 +359,18 @@ export const statsRoutes: FastifyPluginAsync = async (app) => {
       const { period } = query.data;
       const startDate = getDateRange(period);
 
+      // Count unique plays per title
       const topContent = await db
         .select({
           mediaTitle: sessions.mediaTitle,
           mediaType: sessions.mediaType,
-          count: sql<number>`count(*)::int`,
+          count: sql<number>`count(DISTINCT COALESCE(reference_id, id))::int`,
           totalWatchMs: sql<number>`coalesce(sum(duration_ms), 0)::bigint`,
         })
         .from(sessions)
         .where(gte(sessions.startedAt, startDate))
         .groupBy(sessions.mediaTitle, sessions.mediaType)
-        .orderBy(desc(sql`count(*)`))
+        .orderBy(desc(sql`count(DISTINCT COALESCE(reference_id, id))`))
         .limit(20);
 
       return {
@@ -462,74 +399,36 @@ export const statsRoutes: FastifyPluginAsync = async (app) => {
       const { period } = query.data;
       const startDate = getDateRange(period);
 
-      let topUsers: {
-        userId: string;
+      // Use raw query with proper play counting (DISTINCT reference_id)
+      const topUsersResult = await db.execute(sql`
+        SELECT
+          u.id as user_id,
+          u.username,
+          u.thumb_url,
+          u.trust_score,
+          COUNT(DISTINCT COALESCE(s.reference_id, s.id))::int as play_count,
+          COALESCE(SUM(s.duration_ms), 0)::bigint as watch_time_ms
+        FROM users u
+        LEFT JOIN sessions s ON s.user_id = u.id AND s.started_at >= ${startDate}
+        GROUP BY u.id, u.username, u.thumb_url, u.trust_score
+        ORDER BY watch_time_ms DESC
+        LIMIT 10
+      `);
+      const topUsers = (topUsersResult.rows as {
+        user_id: string;
         username: string;
-        thumbUrl: string | null;
-        trustScore: number;
-        playCount: number;
-        watchTimeMs: number;
-      }[];
-
-      if (await hasAggregates()) {
-        // Use continuous aggregate with user join
-        const result = await db.execute(sql`
-          SELECT
-            u.id as user_id,
-            u.username,
-            u.thumb_url,
-            u.trust_score,
-            COALESCE(SUM(a.play_count), 0)::int as play_count,
-            COALESCE(SUM(a.total_duration_ms), 0)::bigint as watch_time_ms
-          FROM users u
-          LEFT JOIN daily_plays_by_user a ON a.user_id = u.id AND a.day >= ${startDate}
-          GROUP BY u.id, u.username, u.thumb_url, u.trust_score
-          ORDER BY watch_time_ms DESC
-          LIMIT 10
-        `);
-        topUsers = (result.rows as {
-          user_id: string;
-          username: string;
-          thumb_url: string | null;
-          trust_score: number;
-          play_count: number;
-          watch_time_ms: string;
-        }[]).map((r) => ({
-          userId: r.user_id,
-          username: r.username,
-          thumbUrl: r.thumb_url,
-          trustScore: r.trust_score,
-          playCount: r.play_count,
-          watchTimeMs: Number(r.watch_time_ms),
-        }));
-      } else {
-        // Fallback to raw sessions query
-        const result = await db
-          .select({
-            userId: users.id,
-            username: users.username,
-            thumbUrl: users.thumbUrl,
-            trustScore: users.trustScore,
-            playCount: sql<number>`count(${sessions.id})::int`,
-            watchTimeMs: sql<number>`coalesce(sum(${sessions.durationMs}), 0)::bigint`,
-          })
-          .from(users)
-          .leftJoin(
-            sessions,
-            and(eq(sessions.userId, users.id), gte(sessions.startedAt, startDate))
-          )
-          .groupBy(users.id, users.username, users.thumbUrl, users.trustScore)
-          .orderBy(desc(sql`coalesce(sum(${sessions.durationMs}), 0)`))
-          .limit(10);
-        topUsers = result.map((r) => ({
-          userId: r.userId,
-          username: r.username,
-          thumbUrl: r.thumbUrl,
-          trustScore: r.trustScore,
-          playCount: r.playCount,
-          watchTimeMs: Number(r.watchTimeMs),
-        }));
-      }
+        thumb_url: string | null;
+        trust_score: number;
+        play_count: number;
+        watch_time_ms: string;
+      }[]).map((r) => ({
+        userId: r.user_id,
+        username: r.username,
+        thumbUrl: r.thumb_url,
+        trustScore: r.trust_score,
+        playCount: r.play_count,
+        watchTimeMs: Number(r.watch_time_ms),
+      }));
 
       return {
         data: topUsers.map((u) => ({
@@ -610,10 +509,11 @@ export const statsRoutes: FastifyPluginAsync = async (app) => {
       const { period } = query.data;
       const startDate = getDateRange(period);
 
+      // Count unique plays by transcode status
       const qualityStats = await db
         .select({
           isTranscode: sessions.isTranscode,
-          count: sql<number>`count(*)::int`,
+          count: sql<number>`count(DISTINCT COALESCE(reference_id, id))::int`,
         })
         .from(sessions)
         .where(gte(sessions.startedAt, startDate))
