@@ -9,6 +9,7 @@
 <p align="center">
   <a href="https://github.com/connorgallopo/Tracearr/actions"><img src="https://img.shields.io/github/actions/workflow/status/connorgallopo/Tracearr/ci.yml?branch=main&style=flat-square" alt="Build Status" /></a>
   <a href="https://github.com/connorgallopo/Tracearr/releases"><img src="https://img.shields.io/github/v/release/connorgallopo/Tracearr?style=flat-square&color=18D1E7" alt="Latest Release" /></a>
+  <a href="https://ghcr.io/connorgallopo/tracearr"><img src="https://img.shields.io/badge/ghcr.io-tracearr-blue?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
   <a href="https://github.com/connorgallopo/Tracearr/blob/main/LICENSE"><img src="https://img.shields.io/github/license/connorgallopo/Tracearr?style=flat-square" alt="License" /></a>
   <a href="https://discord.gg/a7n3sFd2Yw"><img src="https://img.shields.io/discord/1444393247978946684?style=flat-square&logo=discord&logoColor=white&label=Discord&color=5865F2" alt="Discord" /></a>
 </p>
@@ -61,15 +62,32 @@ If you just want to see stats, Tautulli works fine. If you're tired of your brot
 ## Quick Start
 
 ```bash
-# Clone the repo
-git clone https://github.com/connorgallopo/Tracearr.git
-cd Tracearr
-
-# Start with Docker Compose
+# Pull and run
+docker pull ghcr.io/connorgallopo/tracearr:latest
 docker compose -f docker/docker-compose.yml up -d
 ```
 
 Open `http://localhost:3000` and connect your Plex or Jellyfin server.
+
+### Docker Tags
+
+| Tag | What you get |
+|-----|--------------|
+| `latest` | Stable releases |
+| `next` | Latest prerelease (alpha/beta/rc) |
+| `nightly` | Bleeding edge, built daily from main |
+| `0.1.0-alpha.6` | Specific version |
+
+```bash
+# Stable
+docker pull ghcr.io/connorgallopo/tracearr:latest
+
+# Living on the edge
+docker pull ghcr.io/connorgallopo/tracearr:next
+
+# I like broken things
+docker pull ghcr.io/connorgallopo/tracearr:nightly
+```
 
 ### Development Setup
 
