@@ -1,0 +1,164 @@
+import { useState } from 'react';
+import { Film, Tv } from 'lucide-react';
+import { PeriodSelector } from '@/components/ui/period-selector';
+import { MediaCard, MediaCardSmall } from '@/components/media';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useTopContent, type StatsPeriod } from '@/hooks/queries';
+
+export function StatsLibrary() {
+  const [period, setPeriod] = useState<StatsPeriod>('month');
+  const topContent = useTopContent(period);
+
+  // Split content by type
+  const movies = topContent.data?.filter((c) => c.type === 'movie') ?? [];
+  const shows = topContent.data?.filter((c) => c.type === 'episode') ?? [];
+
+  return (
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Library</h1>
+          <p className="text-sm text-muted-foreground">
+            Top movies and shows on your server
+          </p>
+        </div>
+        <PeriodSelector value={period} onChange={setPeriod} />
+      </div>
+
+      {/* Top Movies Section */}
+      <section>
+        <div className="mb-4 flex items-center gap-2">
+          <Film className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-semibold">Top Movies</h2>
+        </div>
+
+        {topContent.isLoading ? (
+          <div className="space-y-4">
+            <Skeleton className="h-44 w-full rounded-xl" />
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} className="aspect-[2/3] rounded-lg" />
+              ))}
+            </div>
+          </div>
+        ) : (
+          (() => {
+            const topMovie = movies[0];
+            if (!topMovie) {
+              return (
+                <div className="rounded-xl border border-dashed p-8 text-center">
+                  <Film className="mx-auto h-12 w-12 text-muted-foreground/50" />
+                  <p className="mt-2 text-muted-foreground">No movie plays in this period</p>
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-4">
+                {/* Featured #1 movie */}
+                <MediaCard
+                  title={topMovie.title}
+                  type={topMovie.type}
+                  showTitle={topMovie.showTitle}
+                  year={topMovie.year}
+                  playCount={topMovie.playCount}
+                  watchTimeHours={topMovie.watchTimeHours}
+                  thumbPath={topMovie.thumbPath}
+                  serverId={topMovie.serverId}
+                  rank={1}
+                />
+
+                {/* Grid of remaining movies */}
+                {movies.length > 1 && (
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,180px))] gap-4">
+                    {movies.slice(1, 10).map((movie, index) => (
+                      <MediaCardSmall
+                        key={`${movie.title}-${movie.year}`}
+                        title={movie.title}
+                        type={movie.type}
+                        showTitle={movie.showTitle}
+                        year={movie.year}
+                        playCount={movie.playCount}
+                        thumbPath={movie.thumbPath}
+                        serverId={movie.serverId}
+                        rank={index + 2}
+                        style={{ animationDelay: `${index * 50}ms` }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()
+        )}
+      </section>
+
+      {/* Top Shows Section */}
+      <section>
+        <div className="mb-4 flex items-center gap-2">
+          <Tv className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-semibold">Top TV Shows</h2>
+        </div>
+
+        {topContent.isLoading ? (
+          <div className="space-y-4">
+            <Skeleton className="h-44 w-full rounded-xl" />
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} className="aspect-[2/3] rounded-lg" />
+              ))}
+            </div>
+          </div>
+        ) : (
+          (() => {
+            const topShow = shows[0];
+            if (!topShow) {
+              return (
+                <div className="rounded-xl border border-dashed p-8 text-center">
+                  <Tv className="mx-auto h-12 w-12 text-muted-foreground/50" />
+                  <p className="mt-2 text-muted-foreground">No TV show plays in this period</p>
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-4">
+                {/* Featured #1 show */}
+                <MediaCard
+                  title={topShow.title}
+                  type={topShow.type}
+                  showTitle={topShow.showTitle}
+                  year={topShow.year}
+                  playCount={topShow.playCount}
+                  watchTimeHours={topShow.watchTimeHours}
+                  thumbPath={topShow.thumbPath}
+                  serverId={topShow.serverId}
+                  rank={1}
+                />
+
+                {/* Grid of remaining shows */}
+                {shows.length > 1 && (
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,180px))] gap-4">
+                    {shows.slice(1, 10).map((show, index) => (
+                      <MediaCardSmall
+                        key={`${show.showTitle ?? show.title}-${show.year}`}
+                        title={show.title}
+                        type={show.type}
+                        showTitle={show.showTitle}
+                        year={show.year}
+                        playCount={show.playCount}
+                        thumbPath={show.thumbPath}
+                        serverId={show.serverId}
+                        rank={index + 2}
+                        style={{ animationDelay: `${index * 50}ms` }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()
+        )}
+      </section>
+    </div>
+  );
+}
