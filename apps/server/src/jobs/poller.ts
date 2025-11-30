@@ -3,7 +3,7 @@
  */
 
 import { eq, and, desc, isNull, sql, gte, inArray } from 'drizzle-orm';
-import { POLLING_INTERVALS, WS_EVENTS, type Session, type ActiveSession, type Rule, type RuleParams, type ViolationWithDetails } from '@tracearr/shared';
+import { POLLING_INTERVALS, WS_EVENTS, type Session, type ActiveSession, type Rule, type RuleParams, type ViolationWithDetails, type ViolationSeverity, type SessionState } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { servers, users, sessions, rules, violations } from '../db/schema.js';
 import { PlexService, type PlexSession } from '../services/plex.js';
@@ -11,6 +11,228 @@ import { JellyfinService, type JellyfinSession } from '../services/jellyfin.js';
 import { geoipService, type GeoLocation } from '../services/geoip.js';
 import { ruleEngine, type RuleEvaluationResult } from '../services/rules.js';
 import { type CacheService, type PubSubService } from '../services/cache.js';
+
+/**
+ * Check if an IP address is private/local (won't have GeoIP data)
+ * Exported for testing
+ */
+export function isPrivateIP(ip: string): boolean {
+  if (!ip) return true;
+
+  // IPv4 private ranges
+  const privateIPv4 = [
+    /^10\./,                          // 10.0.0.0/8
+    /^172\.(1[6-9]|2\d|3[01])\./,     // 172.16.0.0/12
+    /^192\.168\./,                     // 192.168.0.0/16
+    /^127\./,                          // Loopback
+    /^169\.254\./,                     // Link-local
+    /^0\./,                            // Current network
+  ];
+
+  // IPv6 private ranges
+  const privateIPv6 = [
+    /^::1$/i,                          // Loopback
+    /^fe80:/i,                         // Link-local
+    /^fc/i,                            // Unique local
+    /^fd/i,                            // Unique local
+  ];
+
+  return privateIPv4.some(r => r.test(ip)) || privateIPv6.some(r => r.test(ip));
+}
+
+/**
+ * Parse platform and device info from Jellyfin client string
+ * Jellyfin clients report as "Jellyfin iOS", "Jellyfin Android", "Jellyfin Web", etc.
+ * Exported for testing
+ */
+export function parseJellyfinClient(client: string, deviceType?: string): { platform: string; device: string } {
+  // If deviceType is provided and meaningful, use it
+  if (deviceType && deviceType.length > 0 && deviceType !== 'Unknown') {
+    return { platform: client, device: deviceType };
+  }
+
+  const clientLower = client.toLowerCase();
+
+  // iOS devices
+  if (clientLower.includes('ios') || clientLower.includes('iphone')) {
+    return { platform: 'iOS', device: 'iPhone' };
+  }
+  if (clientLower.includes('ipad')) {
+    return { platform: 'iOS', device: 'iPad' };
+  }
+
+  // Android and NVIDIA Shield
+  if (clientLower.includes('android')) {
+    if (clientLower.includes('tv') || clientLower.includes('shield')) {
+      return { platform: 'Android TV', device: 'Android TV' };
+    }
+    return { platform: 'Android', device: 'Android' };
+  }
+  // NVIDIA Shield without "android" in client name
+  if (clientLower.includes('shield')) {
+    return { platform: 'Android TV', device: 'Android TV' };
+  }
+
+  // Smart TVs
+  if (clientLower.includes('samsung') || clientLower.includes('tizen')) {
+    return { platform: 'Tizen', device: 'Samsung TV' };
+  }
+  if (clientLower.includes('webos') || clientLower.includes('lg')) {
+    return { platform: 'webOS', device: 'LG TV' };
+  }
+  if (clientLower.includes('roku')) {
+    return { platform: 'Roku', device: 'Roku' };
+  }
+
+  // Apple TV
+  if (clientLower.includes('tvos') || clientLower.includes('apple tv') || clientLower.includes('swiftfin')) {
+    return { platform: 'tvOS', device: 'Apple TV' };
+  }
+
+  // Desktop/Web
+  if (clientLower.includes('web')) {
+    return { platform: 'Web', device: 'Browser' };
+  }
+
+  // Media players
+  if (clientLower.includes('kodi')) {
+    return { platform: 'Kodi', device: 'Kodi' };
+  }
+  if (clientLower.includes('infuse')) {
+    return { platform: 'Infuse', device: 'Infuse' };
+  }
+
+  // Fallback
+  return { platform: client || 'Unknown', device: deviceType || client || 'Unknown' };
+}
+
+/**
+ * Calculate trust score penalty based on violation severity.
+ * HIGH: -20, WARNING: -10, LOW: -5
+ * Exported for testing.
+ */
+export function getTrustScorePenalty(severity: ViolationSeverity): number {
+  return severity === 'high' ? 20 : severity === 'warning' ? 10 : 5;
+}
+
+/**
+ * Calculate pause accumulation when session state changes.
+ * Handles transitions between playing and paused states.
+ * Exported for testing.
+ */
+export function calculatePauseAccumulation(
+  previousState: SessionState,
+  newState: SessionState,
+  existingSession: { lastPausedAt: Date | null; pausedDurationMs: number },
+  now: Date
+): { lastPausedAt: Date | null; pausedDurationMs: number } {
+  let lastPausedAt = existingSession.lastPausedAt;
+  let pausedDurationMs = existingSession.pausedDurationMs;
+
+  if (previousState === 'playing' && newState === 'paused') {
+    // Started pausing - record timestamp
+    lastPausedAt = now;
+  } else if (previousState === 'paused' && newState === 'playing') {
+    // Resumed playing - accumulate pause duration
+    if (existingSession.lastPausedAt) {
+      const pausedMs = now.getTime() - existingSession.lastPausedAt.getTime();
+      pausedDurationMs = (existingSession.pausedDurationMs || 0) + pausedMs;
+    }
+    lastPausedAt = null;
+  }
+
+  return { lastPausedAt, pausedDurationMs };
+}
+
+/**
+ * Calculate final duration when a session is stopped.
+ * Accounts for any remaining pause time if stopped while paused.
+ * Exported for testing.
+ */
+export function calculateStopDuration(
+  session: { startedAt: Date; lastPausedAt: Date | null; pausedDurationMs: number },
+  stoppedAt: Date
+): { durationMs: number; finalPausedDurationMs: number } {
+  const totalElapsedMs = stoppedAt.getTime() - session.startedAt.getTime();
+
+  // Calculate final paused duration - accumulate any remaining pause if stopped while paused
+  let finalPausedDurationMs = session.pausedDurationMs || 0;
+  if (session.lastPausedAt) {
+    // Session was stopped while paused - add the remaining pause time
+    finalPausedDurationMs += stoppedAt.getTime() - session.lastPausedAt.getTime();
+  }
+
+  // Calculate actual watch duration (excludes all paused time)
+  const durationMs = Math.max(0, totalElapsedMs - finalPausedDurationMs);
+
+  return { durationMs, finalPausedDurationMs };
+}
+
+/**
+ * Check if a session should be marked as "watched" (>=80% progress).
+ * Exported for testing.
+ */
+export function checkWatchCompletion(progressMs: number | null, totalDurationMs: number | null): boolean {
+  if (!progressMs || !totalDurationMs) return false;
+  return (progressMs / totalDurationMs) >= 0.8;
+}
+
+/**
+ * Determine if a new session should be grouped with a previous session (resume tracking).
+ * Returns the referenceId to link to, or null if sessions shouldn't be grouped.
+ * Exported for testing.
+ */
+export function shouldGroupWithPreviousSession(
+  previousSession: {
+    referenceId: string | null;
+    id: string;
+    progressMs: number | null;
+    watched: boolean;
+    stoppedAt: Date | null;
+  },
+  newProgressMs: number,
+  oneDayAgo: Date
+): string | null {
+  // Must be recent (within 24h) and not fully watched
+  if (!previousSession.stoppedAt || previousSession.stoppedAt < oneDayAgo) return null;
+  if (previousSession.watched) return null;
+
+  // New session must be resuming from same or later position
+  const prevProgress = previousSession.progressMs || 0;
+  if (newProgressMs >= prevProgress) {
+    // Link to the first session in the chain
+    return previousSession.referenceId || previousSession.id;
+  }
+
+  return null;
+}
+
+/**
+ * Format quality string from bitrate and transcoding info.
+ * Exported for testing.
+ */
+export function formatQualityString(
+  transcodeBitrate: number,
+  sourceBitrate: number,
+  isTranscoding: boolean
+): string {
+  const bitrate = transcodeBitrate || sourceBitrate;
+  return bitrate > 0
+    ? `${Math.round(bitrate / 1000000)}Mbps`
+    : isTranscoding
+      ? 'Transcoding'
+      : 'Direct';
+}
+
+/**
+ * Check if a rule applies to a specific user.
+ * Global rules (userId=null) apply to all users.
+ * User-specific rules only apply to that user.
+ * Exported for testing.
+ */
+export function doesRuleApplyToUser(rule: { userId: string | null }, userId: string): boolean {
+  return rule.userId === null || rule.userId === userId;
+}
 
 let pollingInterval: NodeJS.Timeout | null = null;
 let cacheService: CacheService | null = null;
@@ -153,18 +375,32 @@ function mapJellyfinSession(session: JellyfinSession): ProcessedSession {
     episodeNumber: nowPlaying?.indexNumber ?? 0,
     year: nowPlaying?.productionYear ?? 0,
     thumbPath,
-    // Connection info
-    ipAddress: session.remoteEndPoint,
+    // Connection info - filter private IPs to avoid GeoIP lookup failures
+    ipAddress: isPrivateIP(session.remoteEndPoint) ? '' : session.remoteEndPoint,
     playerName: session.deviceName,
     deviceId: session.deviceId, // Jellyfin device ID
     product: session.client, // Client app name
-    device: session.deviceType ?? '', // Device type
-    platform: session.client,
-    quality: session.transcodingInfo
-      ? `${Math.round((session.transcodingInfo.bitrate || 0) / 1000)}Mbps`
-      : 'Direct',
-    isTranscode: !(session.transcodingInfo?.isVideoDirect ?? true),
-    bitrate: session.transcodingInfo?.bitrate ?? 0,
+    // Parse platform and device from client string
+    ...parseJellyfinClient(session.client, session.deviceType),
+    // Get bitrate from transcoding info OR source media
+    ...(() => {
+      const transcodeBitrate = session.transcodingInfo?.bitrate ?? 0;
+      const sourceBitrate = session.nowPlayingItem?.mediaSources?.[0]?.bitrate ?? 0;
+      const bitrate = transcodeBitrate || sourceBitrate;
+
+      // Build quality string
+      const quality = bitrate > 0
+        ? `${Math.round(bitrate / 1000000)}Mbps`
+        : session.transcodingInfo
+          ? 'Transcoding'
+          : 'Direct';
+
+      return {
+        quality,
+        isTranscode: !(session.transcodingInfo?.isVideoDirect ?? true),
+        bitrate,
+      };
+    })(),
     state: session.playState?.isPaused ? 'paused' : 'playing',
     totalDurationMs: runTimeTicks / 10000, // Ticks to ms
     progressMs: positionTicks / 10000,
@@ -282,7 +518,7 @@ async function createViolation(
   rule: Rule
 ): Promise<void> {
   // Calculate trust penalty based on severity
-  const trustPenalty = result.severity === 'high' ? 20 : result.severity === 'warning' ? 10 : 5;
+  const trustPenalty = getTrustScorePenalty(result.severity);
 
   // Use transaction to ensure violation creation and trust score update are atomic
   const created = await db.transaction(async (tx) => {
@@ -680,24 +916,18 @@ async function processServerSessions(
         };
 
         // Handle state transitions for pause tracking
-        if (previousState === 'playing' && newState === 'paused') {
-          // Started pausing - record timestamp
-          updatePayload.lastPausedAt = now;
-        } else if (previousState === 'paused' && newState === 'playing') {
-          // Resumed playing - accumulate pause duration
-          if (existingSession.lastPausedAt) {
-            const pausedMs = now.getTime() - existingSession.lastPausedAt.getTime();
-            updatePayload.pausedDurationMs = (existingSession.pausedDurationMs || 0) + pausedMs;
-          }
-          updatePayload.lastPausedAt = null;
-        }
+        const pauseResult = calculatePauseAccumulation(
+          previousState as SessionState,
+          newState,
+          { lastPausedAt: existingSession.lastPausedAt, pausedDurationMs: existingSession.pausedDurationMs || 0 },
+          now
+        );
+        updatePayload.lastPausedAt = pauseResult.lastPausedAt;
+        updatePayload.pausedDurationMs = pauseResult.pausedDurationMs;
 
         // Check for watch completion (80% threshold)
-        if (!existingSession.watched && processed.progressMs && processed.totalDurationMs) {
-          const watchPercent = processed.progressMs / processed.totalDurationMs;
-          if (watchPercent >= 0.8) {
-            updatePayload.watched = true;
-          }
+        if (!existingSession.watched && checkWatchCompletion(processed.progressMs, processed.totalDurationMs)) {
+          updatePayload.watched = true;
         }
 
         // Update existing session with state changes and pause tracking
@@ -778,26 +1008,22 @@ async function processServerSessions(
         const stoppedSession = stoppedRows[0];
         if (stoppedSession) {
           const stoppedAt = new Date();
-          const totalElapsedMs = stoppedAt.getTime() - stoppedSession.startedAt.getTime();
 
-          // Calculate final paused duration - accumulate any remaining pause if stopped while paused
-          let finalPausedDurationMs = stoppedSession.pausedDurationMs || 0;
-          if (stoppedSession.lastPausedAt) {
-            // Session was stopped while paused - add the remaining pause time
-            finalPausedDurationMs += stoppedAt.getTime() - stoppedSession.lastPausedAt.getTime();
-          }
+          // Calculate final duration
+          const { durationMs, finalPausedDurationMs } = calculateStopDuration(
+            {
+              startedAt: stoppedSession.startedAt,
+              lastPausedAt: stoppedSession.lastPausedAt,
+              pausedDurationMs: stoppedSession.pausedDurationMs || 0,
+            },
+            stoppedAt
+          );
 
-          // Calculate actual watch duration (excludes all paused time)
-          const durationMs = Math.max(0, totalElapsedMs - finalPausedDurationMs);
-
-          // Check for watch completion if not already watched
-          let watched = stoppedSession.watched || false;
-          if (!watched && stoppedSession.progressMs && stoppedSession.totalDurationMs) {
-            const watchPercent = stoppedSession.progressMs / stoppedSession.totalDurationMs;
-            if (watchPercent >= 0.8) {
-              watched = true;
-            }
-          }
+          // Check for watch completion 
+          const watched = stoppedSession.watched || checkWatchCompletion(
+            stoppedSession.progressMs,
+            stoppedSession.totalDurationMs
+          );
 
           await db
             .update(sessions)
