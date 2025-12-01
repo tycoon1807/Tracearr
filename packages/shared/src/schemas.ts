@@ -157,6 +157,10 @@ export const updateSettingsSchema = z.object({
   // Tautulli integration
   tautulliUrl: z.url().nullable().optional(),
   tautulliApiKey: z.string().nullable().optional(),
+  // Network/access settings
+  externalUrl: z.url().nullable().optional(),
+  basePath: z.string().max(100).optional(),
+  trustProxy: z.boolean().optional(),
 });
 
 // Tautulli import schemas

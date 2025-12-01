@@ -299,6 +299,10 @@ export interface Settings {
   // Tautulli integration
   tautulliUrl: string | null;
   tautulliApiKey: string | null;
+  // Network/access settings
+  externalUrl: string | null;
+  basePath: string;
+  trustProxy: boolean;
 }
 
 // Tautulli import types
