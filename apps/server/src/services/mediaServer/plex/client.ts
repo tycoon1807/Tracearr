@@ -66,6 +66,7 @@ export class PlexClient implements IMediaServerClient, IMediaServerClientWithHis
     const data = await fetchJson<unknown>(`${this.baseUrl}/status/sessions`, {
       headers: this.buildHeaders(),
       service: 'plex',
+      timeout: 10000, // 10s timeout to prevent polling hangs
     });
 
     return parseSessionsResponse(data);

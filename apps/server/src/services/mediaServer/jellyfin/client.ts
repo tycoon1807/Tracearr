@@ -79,6 +79,7 @@ export class JellyfinClient implements IMediaServerClient, IMediaServerClientWit
     const data = await fetchJson<unknown[]>(`${this.baseUrl}/Sessions`, {
       headers: this.buildHeaders(),
       service: 'jellyfin',
+      timeout: 10000, // 10s timeout to prevent polling hangs
     });
 
     return parseSessionsResponse(data);
