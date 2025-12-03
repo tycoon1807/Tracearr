@@ -979,7 +979,7 @@ function MobileSettings() {
                         value={getQRData()}
                         size={200}
                         level="M"
-                        includeMargin={false}
+                        marginSize={0}
                       />
                     </div>
                     <p className="text-sm text-muted-foreground text-center max-w-sm">

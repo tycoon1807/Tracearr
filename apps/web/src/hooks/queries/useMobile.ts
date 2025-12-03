@@ -27,7 +27,7 @@ export function useEnableMobile() {
     onError: (err) => {
       toast({
         title: 'Failed to Enable Mobile Access',
-        description: (err as Error).message,
+        description: err.message,
         variant: 'destructive',
       });
     },
@@ -53,7 +53,7 @@ export function useDisableMobile() {
     onError: (err) => {
       toast({
         title: 'Failed to Disable Mobile Access',
-        description: (err as Error).message,
+        description: err.message,
         variant: 'destructive',
       });
     },
@@ -76,7 +76,7 @@ export function useRotateMobileToken() {
     onError: (err) => {
       toast({
         title: 'Failed to Rotate Token',
-        description: (err as Error).message,
+        description: err.message,
         variant: 'destructive',
       });
     },
@@ -102,7 +102,7 @@ export function useRevokeMobileSessions() {
     onError: (err) => {
       toast({
         title: 'Failed to Revoke Sessions',
-        description: (err as Error).message,
+        description: err.message,
         variant: 'destructive',
       });
     },
