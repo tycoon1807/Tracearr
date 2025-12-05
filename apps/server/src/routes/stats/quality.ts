@@ -110,7 +110,16 @@ export const qualityRoutes: FastifyPluginAsync = async (app) => {
   );
 
   /**
-   * GET /concurrent - Concurrent stream history
+   * GET /concurrent - Peak concurrent streams per hour with direct/transcode breakdown
+   *
+   * Calculates TRUE peak concurrent: the maximum number of sessions running
+   * simultaneously at any moment within each hour.
+   *
+   * Algorithm:
+   * 1. Create "initial state" events for sessions already running at startDate
+   * 2. Create events for session starts (+1) and stops (-1) within the window
+   * 3. Use window function to calculate running count at each event
+   * 4. Group by hour and take MAX for peak concurrent
    */
   app.get(
     '/concurrent',
@@ -124,37 +133,76 @@ export const qualityRoutes: FastifyPluginAsync = async (app) => {
       const { period } = query.data;
       const startDate = getDateRange(period);
 
-      let hourlyData: { hour: string; maxConcurrent: number }[];
-
-      if (await hasAggregates()) {
-        // Use continuous aggregate - sums across servers
-        const result = await db.execute(sql`
+      // Event-based calculation with proper boundary handling
+      // Uses TimescaleDB-optimized time-based filtering on hypertable
+      const result = await db.execute(sql`
+        WITH events AS (
+          -- Sessions already running at startDate (started before, not yet stopped)
+          -- These need a +1 event at startDate to establish initial state
           SELECT
-            hour::text,
-            SUM(stream_count)::int as max_concurrent
-          FROM hourly_concurrent_streams
-          WHERE hour >= ${startDate}
-          GROUP BY hour
-          ORDER BY hour
-        `);
-        hourlyData = (result.rows as { hour: string; max_concurrent: number }[]).map((r) => ({
-          hour: r.hour,
-          maxConcurrent: r.max_concurrent,
-        }));
-      } else {
-        // Fallback to raw sessions query
-        // This is simplified - a production version would use time-range overlaps
-        const result = await db
-          .select({
-            hour: sql<string>`date_trunc('hour', started_at)::text`,
-            maxConcurrent: sql<number>`count(*)::int`,
-          })
-          .from(sessions)
-          .where(gte(sessions.startedAt, startDate))
-          .groupBy(sql`date_trunc('hour', started_at)`)
-          .orderBy(sql`date_trunc('hour', started_at)`);
-        hourlyData = result;
-      }
+            ${startDate}::timestamp AS event_time,
+            1 AS delta,
+            CASE WHEN is_transcode THEN 0 ELSE 1 END AS direct_delta,
+            CASE WHEN is_transcode THEN 1 ELSE 0 END AS transcode_delta
+          FROM sessions
+          WHERE started_at < ${startDate}
+            AND (stopped_at IS NULL OR stopped_at >= ${startDate})
+
+          UNION ALL
+
+          -- Session start events within the window
+          SELECT
+            started_at AS event_time,
+            1 AS delta,
+            CASE WHEN is_transcode THEN 0 ELSE 1 END AS direct_delta,
+            CASE WHEN is_transcode THEN 1 ELSE 0 END AS transcode_delta
+          FROM sessions
+          WHERE started_at >= ${startDate}
+
+          UNION ALL
+
+          -- Session stop events within the window
+          SELECT
+            stopped_at AS event_time,
+            -1 AS delta,
+            CASE WHEN is_transcode THEN 0 ELSE -1 END AS direct_delta,
+            CASE WHEN is_transcode THEN -1 ELSE 0 END AS transcode_delta
+          FROM sessions
+          WHERE stopped_at IS NOT NULL
+            AND stopped_at >= ${startDate}
+        ),
+        running_counts AS (
+          -- Running sum gives concurrent count at each event point
+          SELECT
+            event_time,
+            SUM(delta) OVER w AS concurrent,
+            SUM(direct_delta) OVER w AS direct_concurrent,
+            SUM(transcode_delta) OVER w AS transcode_concurrent
+          FROM events
+          WHERE event_time IS NOT NULL
+          WINDOW w AS (ORDER BY event_time ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+        )
+        SELECT
+          date_trunc('hour', event_time)::text AS hour,
+          COALESCE(MAX(concurrent), 0)::int AS total,
+          COALESCE(MAX(direct_concurrent), 0)::int AS direct,
+          COALESCE(MAX(transcode_concurrent), 0)::int AS transcode
+        FROM running_counts
+        GROUP BY date_trunc('hour', event_time)
+        ORDER BY hour
+      `);
+
+      const hourlyData = (result.rows as {
+        hour: string;
+        total: number;
+        direct: number;
+        transcode: number;
+      }[]).map((r) => ({
+        hour: r.hour,
+        total: r.total,
+        direct: r.direct,
+        transcode: r.transcode,
+      }));
 
       return { data: hourlyData };
     }

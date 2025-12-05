@@ -11,11 +11,14 @@ import { sql, gte } from 'drizzle-orm';
 import { statsQuerySchema } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { sessions } from '../../db/schema.js';
-import { getDateRange, hasAggregates } from './utils.js';
+import { getDateRange, hasAggregates, hasHyperLogLog } from './utils.js';
 
 export const playsRoutes: FastifyPluginAsync = async (app) => {
   /**
    * GET /plays - Plays over time
+   *
+   * Uses HyperLogLog continuous aggregates when available for ~99.5% accurate
+   * unique play counts with much better performance. Falls back to raw queries.
    */
   app.get(
     '/plays',
@@ -29,9 +32,27 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
       const { period } = query.data;
       const startDate = getDateRange(period);
 
-      // Note: Continuous aggregates use COUNT(*) which counts sessions, not unique plays.
-      // For accurate play counts, we use raw query with DISTINCT COALESCE(reference_id, id).
-      // TODO: Recreate continuous aggregates with proper grouping for better performance.
+      // Check if we can use optimized HyperLogLog aggregates
+      const [hllAvailable, aggAvailable] = await Promise.all([
+        hasHyperLogLog(),
+        hasAggregates(),
+      ]);
+
+      if (hllAvailable && aggAvailable) {
+        // Use HyperLogLog continuous aggregate for ~99.5% accurate unique plays
+        const result = await db.execute(sql`
+          SELECT
+            day::date::text as date,
+            approx_count_distinct(plays_hll)::int as count
+          FROM daily_stats_summary
+          WHERE day >= ${startDate}
+          GROUP BY day
+          ORDER BY day
+        `);
+        return { data: result.rows as { date: string; count: number }[] };
+      }
+
+      // Fallback to raw query with exact COUNT DISTINCT
       const playsByDate = await db
         .select({
           date: sql<string>`date_trunc('day', started_at)::date::text`,
@@ -48,6 +69,8 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * GET /plays-by-dayofweek - Plays grouped by day of week
+   *
+   * Uses HyperLogLog aggregates when available for approximate unique play counts.
    */
   app.get(
     '/plays-by-dayofweek',
@@ -65,8 +88,26 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
 
       let dayStats: { day: number; count: number }[];
 
-      if (await hasAggregates()) {
-        // Use continuous aggregate
+      // Check if we can use optimized HyperLogLog aggregates
+      const [hllAvailable, aggAvailable] = await Promise.all([
+        hasHyperLogLog(),
+        hasAggregates(),
+      ]);
+
+      if (hllAvailable && aggAvailable) {
+        // Use HyperLogLog continuous aggregate for approximate unique plays
+        const result = await db.execute(sql`
+          SELECT
+            day_of_week as day,
+            approx_count_distinct(rollup(plays_hll))::int as count
+          FROM daily_play_patterns
+          WHERE week >= ${startDate}
+          GROUP BY day_of_week
+          ORDER BY day_of_week
+        `);
+        dayStats = (result.rows as { day: number; count: number }[]);
+      } else if (aggAvailable) {
+        // Use standard continuous aggregate with SUM
         const result = await db.execute(sql`
           SELECT
             day_of_week as day,
@@ -105,6 +146,8 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * GET /plays-by-hourofday - Plays grouped by hour of day
+   *
+   * Uses HyperLogLog aggregates when available for approximate unique play counts.
    */
   app.get(
     '/plays-by-hourofday',
@@ -120,8 +163,26 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
 
       let hourStats: { hour: number; count: number }[];
 
-      if (await hasAggregates()) {
-        // Use continuous aggregate
+      // Check if we can use optimized HyperLogLog aggregates
+      const [hllAvailable, aggAvailable] = await Promise.all([
+        hasHyperLogLog(),
+        hasAggregates(),
+      ]);
+
+      if (hllAvailable && aggAvailable) {
+        // Use HyperLogLog continuous aggregate for approximate unique plays
+        const result = await db.execute(sql`
+          SELECT
+            hour_of_day as hour,
+            approx_count_distinct(rollup(plays_hll))::int as count
+          FROM hourly_play_patterns
+          WHERE day >= ${startDate}
+          GROUP BY hour_of_day
+          ORDER BY hour_of_day
+        `);
+        hourStats = (result.rows as { hour: number; count: number }[]);
+      } else if (aggAvailable) {
+        // Use standard continuous aggregate with SUM
         const result = await db.execute(sql`
           SELECT
             hour_of_day as hour,
