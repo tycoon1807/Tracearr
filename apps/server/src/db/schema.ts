@@ -179,6 +179,7 @@ export const sessions = pgTable(
     externalSessionId: varchar('external_session_id', { length: 255 }), // External reference for deduplication
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     stoppedAt: timestamp('stopped_at', { withTimezone: true }),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(), // Last time session was seen in poll (for stale detection) - no default, app always provides
     durationMs: integer('duration_ms'), // Actual watch duration (excludes paused time)
     totalDurationMs: integer('total_duration_ms'), // Total media length
     progressMs: integer('progress_ms'), // Current playback position
@@ -187,7 +188,9 @@ export const sessions = pgTable(
     pausedDurationMs: integer('paused_duration_ms').notNull().default(0), // Accumulated pause time
     // Session grouping for "resume where left off" tracking
     referenceId: uuid('reference_id'), // Links to first session in resume chain
-    watched: boolean('watched').notNull().default(false), // True if user watched 80%+
+    watched: boolean('watched').notNull().default(false), // True if user watched 85%+
+    forceStopped: boolean('force_stopped').notNull().default(false), // True if session was force-stopped due to inactivity
+    shortSession: boolean('short_session').notNull().default(false), // True if session duration < MIN_PLAY_TIME_MS (120s)
     ipAddress: varchar('ip_address', { length: 45 }).notNull(),
     geoCity: varchar('geo_city', { length: 255 }),
     geoRegion: varchar('geo_region', { length: 255 }), // State/province/subdivision
@@ -220,6 +223,8 @@ export const sessions = pgTable(
     // Indexes for top-content queries (movies and shows aggregation)
     index('sessions_top_movies_idx').on(table.mediaType, table.mediaTitle, table.year), // For top movies GROUP BY
     index('sessions_top_shows_idx').on(table.mediaType, table.grandparentTitle), // For top shows GROUP BY series
+    // Index for stale session detection (active sessions that haven't been seen recently)
+    index('sessions_stale_detection_idx').on(table.lastSeenAt, table.stoppedAt),
   ]
 );
 

@@ -64,6 +64,13 @@
       "when": 1764871905960,
       "tag": "0008_update_mobile_tokens_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1764996689797,
+      "tag": "0009_quiet_vertigo",
+      "breakpoints": true
     }
   ]
 }
