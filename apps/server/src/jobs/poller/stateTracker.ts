@@ -92,27 +92,89 @@ export function calculateStopDuration(
 }
 
 // ============================================================================
+// Stale Session Detection
+// ============================================================================
+
+/**
+ * Determine if a session should be force-stopped due to inactivity.
+ * A session is considered stale when no updates have been received for the timeout period.
+ *
+ * @param lastSeenAt - Last update timestamp for the session
+ * @param timeoutSeconds - Optional custom timeout in seconds, defaults to 5 minutes
+ * @returns true if the session should be force-stopped
+ *
+ * @example
+ * // Session last seen 6 minutes ago
+ * shouldForceStopStaleSession(sixMinutesAgo); // true
+ *
+ * // Session last seen 3 minutes ago
+ * shouldForceStopStaleSession(threeMinutesAgo); // false
+ *
+ * // Exactly at threshold (5 minutes) - NOT stale yet
+ * shouldForceStopStaleSession(fiveMinutesAgo); // false
+ */
+export function shouldForceStopStaleSession(
+  lastSeenAt: Date,
+  timeoutSeconds: number = SESSION_LIMITS.STALE_SESSION_TIMEOUT_SECONDS
+): boolean {
+  const elapsedMs = Date.now() - lastSeenAt.getTime();
+  const timeoutMs = timeoutSeconds * 1000;
+  // Strictly greater than - at exactly the threshold, session is NOT stale yet
+  return elapsedMs > timeoutMs;
+}
+
+// ============================================================================
+// Minimum Play Time Filtering
+// ============================================================================
+
+/**
+ * Determine if a session should be recorded based on minimum play time.
+ * Sessions shorter than the threshold are filtered out to reduce noise.
+ *
+ * @param durationMs - Session duration in milliseconds
+ * @param minPlayTimeMs - Optional custom minimum play time, defaults to 2 minutes
+ * @returns true if the session should be recorded
+ *
+ * @example
+ * shouldRecordSession(60 * 1000);  // false (1 min < 2 min threshold)
+ * shouldRecordSession(120 * 1000); // true (exactly 2 min threshold)
+ * shouldRecordSession(180 * 1000); // true (3 min > threshold)
+ * shouldRecordSession(1000, 0);    // true (no minimum when 0)
+ */
+export function shouldRecordSession(
+  durationMs: number,
+  minPlayTimeMs: number = SESSION_LIMITS.MIN_PLAY_TIME_MS
+): boolean {
+  // If minimum is 0, always record
+  if (minPlayTimeMs === 0) return true;
+  return durationMs >= minPlayTimeMs;
+}
+
+// ============================================================================
 // Watch Completion
 // ============================================================================
 
 /**
- * Check if a session should be marked as "watched" (>=80% progress).
+ * Check if a session should be marked as "watched" based on progress threshold.
  *
  * @param progressMs - Current playback position in milliseconds
  * @param totalDurationMs - Total media duration in milliseconds
- * @returns true if watched at least 80% of the content
+ * @param threshold - Optional custom threshold (0-1), defaults to 85%
+ * @returns true if watched at least the threshold percentage of the content
  *
  * @example
- * checkWatchCompletion(4800000, 6000000);  // true (80%)
- * checkWatchCompletion(3000000, 6000000);  // false (50%)
- * checkWatchCompletion(null, 6000000);     // false (no progress)
+ * checkWatchCompletion(8500, 10000);         // true (85% with default threshold)
+ * checkWatchCompletion(8000, 10000);         // false (80% < 85% default)
+ * checkWatchCompletion(9000, 10000, 0.90);   // true (90% with custom threshold)
+ * checkWatchCompletion(null, 6000000);       // false (no progress)
  */
 export function checkWatchCompletion(
   progressMs: number | null,
-  totalDurationMs: number | null
+  totalDurationMs: number | null,
+  threshold: number = SESSION_LIMITS.WATCH_COMPLETION_THRESHOLD
 ): boolean {
   if (!progressMs || !totalDurationMs) return false;
-  return (progressMs / totalDurationMs) >= SESSION_LIMITS.WATCH_COMPLETION_THRESHOLD;
+  return (progressMs / totalDurationMs) >= threshold;
 }
 
 // ============================================================================
@@ -125,29 +187,29 @@ export function checkWatchCompletion(
  *
  * Sessions are grouped when:
  * - Same user and same media item (ratingKey)
- * - Previous session stopped within 24 hours
+ * - Previous session stopped within 24 hours (absolute maximum)
+ * - Previous session stopped within continued session threshold (default 60s)
  * - Previous session wasn't fully watched
  * - New session starts at same or later position (resuming, not rewatching)
  *
  * @param previousSession - Previous session data for the same user/media
  * @param newProgressMs - Current playback position of new session
- * @param oneDayAgo - Date threshold for session grouping (24 hours ago)
+ * @param continuedThresholdMs - Optional custom threshold for "continued session" grouping (default: 60s)
  * @returns referenceId to link to, or null if not grouping
  *
  * @example
- * // Resuming a paused movie
+ * // Resuming within 60s (default threshold)
  * shouldGroupWithPreviousSession(
- *   { id: 'sess-1', referenceId: null, progressMs: 1800000, watched: false, stoppedAt: oneHourAgo },
- *   1800000,
- *   oneDayAgo
+ *   { id: 'sess-1', referenceId: null, progressMs: 1800000, watched: false, stoppedAt: thirtySecondsAgo },
+ *   1800000
  * ); // Returns: 'sess-1'
  *
- * // Rewatching from beginning (not grouped)
+ * // Continued session with 5 minute threshold
  * shouldGroupWithPreviousSession(
- *   { id: 'sess-1', referenceId: null, progressMs: 5400000, watched: false, stoppedAt: oneHourAgo },
- *   0,
- *   oneDayAgo
- * ); // Returns: null (position went backward)
+ *   { id: 'sess-1', referenceId: null, progressMs: 1800000, watched: false, stoppedAt: twoMinutesAgo },
+ *   1800000,
+ *   5 * 60 * 1000  // 5 minute threshold
+ * ); // Returns: 'sess-1' (within threshold)
  */
 export function shouldGroupWithPreviousSession(
   previousSession: {
@@ -158,10 +220,21 @@ export function shouldGroupWithPreviousSession(
     stoppedAt: Date | null;
   },
   newProgressMs: number,
-  oneDayAgo: Date
+  continuedThresholdMs?: number
 ): string | null {
-  // Must be recent (within 24h) and not fully watched
-  if (!previousSession.stoppedAt || previousSession.stoppedAt < oneDayAgo) return null;
+  // Must have a stoppedAt time
+  if (!previousSession.stoppedAt) return null;
+
+  // Calculate 24h window internally - absolute maximum for any grouping
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  if (previousSession.stoppedAt < twentyFourHoursAgo) return null;
+
+  // Apply continued session threshold (default: 60 seconds from SESSION_LIMITS)
+  const thresholdMs = continuedThresholdMs ?? SESSION_LIMITS.CONTINUED_SESSION_THRESHOLD_MS;
+  const gapMs = Date.now() - previousSession.stoppedAt.getTime();
+  if (gapMs > thresholdMs) return null;
+
+  // Must not be fully watched
   if (previousSession.watched) return null;
 
   // New session must be resuming from same or later position

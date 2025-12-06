@@ -194,17 +194,17 @@ describe('calculateStopDuration', () => {
 });
 
 describe('checkWatchCompletion', () => {
-  describe('80% threshold', () => {
-    it('should return true when progress >= 80%', () => {
-      expect(checkWatchCompletion(8000, 10000)).toBe(true); // Exactly 80%
+  describe('85% threshold (industry standard)', () => {
+    it('should return true when progress >= 85%', () => {
+      expect(checkWatchCompletion(8500, 10000)).toBe(true); // Exactly 85%
       expect(checkWatchCompletion(9000, 10000)).toBe(true); // 90%
       expect(checkWatchCompletion(10000, 10000)).toBe(true); // 100%
     });
 
-    it('should return false when progress < 80%', () => {
-      expect(checkWatchCompletion(7999, 10000)).toBe(false); // Just under 80%
+    it('should return false when progress < 85%', () => {
+      expect(checkWatchCompletion(8499, 10000)).toBe(false); // Just under 85%
+      expect(checkWatchCompletion(8000, 10000)).toBe(false); // 80%
       expect(checkWatchCompletion(5000, 10000)).toBe(false); // 50%
-      expect(checkWatchCompletion(1000, 10000)).toBe(false); // 10%
     });
   });
 
@@ -225,9 +225,9 @@ describe('checkWatchCompletion', () => {
 
 describe('shouldGroupWithPreviousSession', () => {
   describe('session grouping', () => {
-    it('should group when resuming from same progress', () => {
+    it('should group when resuming from same progress within threshold', () => {
       const previousSessionId = randomUUID();
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
 
       const result = shouldGroupWithPreviousSession(
         {
@@ -235,10 +235,9 @@ describe('shouldGroupWithPreviousSession', () => {
           referenceId: null,
           progressMs: 30 * 60 * 1000,
           watched: false,
-          stoppedAt: new Date(),
+          stoppedAt: thirtySecondsAgo,
         },
-        30 * 60 * 1000,
-        oneDayAgo
+        30 * 60 * 1000
       );
 
       expect(result).toBe(previousSessionId);
@@ -247,7 +246,7 @@ describe('shouldGroupWithPreviousSession', () => {
     it('should use existing referenceId for chained sessions', () => {
       const originalSessionId = randomUUID();
       const previousSessionId = randomUUID();
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
 
       const result = shouldGroupWithPreviousSession(
         {
@@ -255,10 +254,9 @@ describe('shouldGroupWithPreviousSession', () => {
           referenceId: originalSessionId,
           progressMs: 60 * 60 * 1000,
           watched: false,
-          stoppedAt: new Date(),
+          stoppedAt: thirtySecondsAgo,
         },
-        60 * 60 * 1000,
-        oneDayAgo
+        60 * 60 * 1000
       );
 
       expect(result).toBe(originalSessionId);
@@ -267,7 +265,7 @@ describe('shouldGroupWithPreviousSession', () => {
 
   describe('no grouping conditions', () => {
     it('should not group if previous session was fully watched', () => {
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
 
       const result = shouldGroupWithPreviousSession(
         {
@@ -275,10 +273,9 @@ describe('shouldGroupWithPreviousSession', () => {
           referenceId: null,
           progressMs: 90 * 60 * 1000,
           watched: true,
-          stoppedAt: new Date(),
+          stoppedAt: thirtySecondsAgo,
         },
-        0,
-        oneDayAgo
+        0
       );
 
       expect(result).toBeNull();
@@ -286,7 +283,6 @@ describe('shouldGroupWithPreviousSession', () => {
 
     it('should not group if previous session is older than 24 hours', () => {
       const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
       const result = shouldGroupWithPreviousSession(
         {
@@ -296,15 +292,14 @@ describe('shouldGroupWithPreviousSession', () => {
           watched: false,
           stoppedAt: twoDaysAgo,
         },
-        30 * 60 * 1000,
-        oneDayAgo
+        30 * 60 * 1000
       );
 
       expect(result).toBeNull();
     });
 
     it('should not group if user rewound (new progress < previous)', () => {
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
 
       const result = shouldGroupWithPreviousSession(
         {
@@ -312,10 +307,26 @@ describe('shouldGroupWithPreviousSession', () => {
           referenceId: null,
           progressMs: 60 * 60 * 1000,
           watched: false,
-          stoppedAt: new Date(),
+          stoppedAt: thirtySecondsAgo,
         },
-        30 * 60 * 1000, // Rewound
-        oneDayAgo
+        30 * 60 * 1000 // Rewound
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it('should not group if gap exceeds default threshold (60s)', () => {
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+
+      const result = shouldGroupWithPreviousSession(
+        {
+          id: randomUUID(),
+          referenceId: null,
+          progressMs: 30 * 60 * 1000,
+          watched: false,
+          stoppedAt: twoMinutesAgo,
+        },
+        30 * 60 * 1000
       );
 
       expect(result).toBeNull();
@@ -354,7 +365,7 @@ describe('Integration: Complete Watch Session', () => {
 
   it('should correctly chain session groups', () => {
     const session1Id = randomUUID();
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
 
     // First resume - links to session1
     const ref1 = shouldGroupWithPreviousSession(
@@ -363,10 +374,9 @@ describe('Integration: Complete Watch Session', () => {
         referenceId: null,
         progressMs: 30 * 60 * 1000,
         watched: false,
-        stoppedAt: new Date(),
+        stoppedAt: thirtySecondsAgo,
       },
-      30 * 60 * 1000,
-      oneDayAgo
+      30 * 60 * 1000
     );
     expect(ref1).toBe(session1Id);
 
@@ -378,10 +388,9 @@ describe('Integration: Complete Watch Session', () => {
         referenceId: session1Id,
         progressMs: 60 * 60 * 1000,
         watched: false,
-        stoppedAt: new Date(),
+        stoppedAt: thirtySecondsAgo,
       },
-      60 * 60 * 1000,
-      oneDayAgo
+      60 * 60 * 1000
     );
     expect(ref2).toBe(session1Id);
   });
