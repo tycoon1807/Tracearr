@@ -1,143 +1,106 @@
-import { Activity, Play, Clock, AlertTriangle, Tv, Radio } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useMemo } from 'react';
+import { Play, Clock, AlertTriangle, Tv, Server, MapPin, Calendar, Users } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { NowPlayingCard } from '@/components/sessions';
 import { StreamCard } from '@/components/map';
+import { ServerResourceCharts } from '@/components/charts/ServerResourceCharts';
 import { useDashboardStats, useActiveSessions } from '@/hooks/queries';
-import { cn } from '@/lib/utils';
+import { useServers, useServerStatistics } from '@/hooks/queries/useServers';
 
 export function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: sessions } = useActiveSessions();
+  const { data: servers } = useServers();
+
+  // Find first Plex server for resource stats (only Plex has this endpoint)
+  const plexServer = useMemo(() => {
+    return servers?.find((s) => s.type === 'plex');
+  }, [servers]);
+
+  // Poll server statistics only when viewing dashboard and we have a Plex server
+  const {
+    data: serverStats,
+    isLoading: statsChartLoading,
+    averages,
+  } = useServerStatistics(plexServer?.id, !!plexServer);
 
   const activeCount = sessions?.length ?? 0;
   const hasActiveStreams = activeCount > 0;
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            {hasActiveStreams ? (
-              <>
-                <span className="inline-flex items-center gap-1.5">
-                  <Radio className="h-3 w-3 animate-pulse text-primary" />
-                  {activeCount} active {activeCount === 1 ? 'stream' : 'streams'}
-                </span>
-              </>
-            ) : (
-              'Monitor your server activity in real-time'
-            )}
-          </p>
+      {/* Today Stats Section */}
+      <section>
+        <div className="mb-4 flex items-center gap-2">
+          <Calendar className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-semibold">Today</h2>
         </div>
-      </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Alerts */}
+          <Card>
+            <CardContent className="flex items-center justify-between py-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Alerts</p>
+                {statsLoading ? (
+                  <Skeleton className="h-7 w-12 mt-1" />
+                ) : (
+                  <div className="text-2xl font-bold">{stats?.alertsLast24h ?? 0}</div>
+                )}
+              </div>
+              <AlertTriangle className="h-5 w-5 text-muted-foreground" />
+            </CardContent>
+          </Card>
 
-      {/* Hero Stats Bar */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Active Streams - highlighted */}
-        <Card
-          className={cn(
-            'relative overflow-hidden transition-colors',
-            hasActiveStreams && 'border-primary/50 bg-primary/5'
-          )}
-        >
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Streams</CardTitle>
-            <div className="relative">
-              <Activity className="h-4 w-4 text-primary" />
-              {hasActiveStreams && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                </span>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <>
-                <Skeleton className="h-8 w-16" />
-                <Skeleton className="mt-1 h-4 w-24" />
-              </>
-            ) : (
-              <>
-                <div className="text-3xl font-bold">{activeCount}</div>
-                <p className="text-xs text-muted-foreground">
-                  {hasActiveStreams ? 'Currently streaming' : 'No active streams'}
-                </p>
-              </>
-            )}
-          </CardContent>
-        </Card>
+          {/* Plays */}
+          <Card>
+            <CardContent className="flex items-center justify-between py-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Plays</p>
+                {statsLoading ? (
+                  <Skeleton className="h-7 w-12 mt-1" />
+                ) : (
+                  <div className="text-2xl font-bold">{stats?.todayPlays ?? 0}</div>
+                )}
+              </div>
+              <Play className="h-5 w-5 text-muted-foreground" />
+            </CardContent>
+          </Card>
 
-        {/* Alerts */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Alerts</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <>
-                <Skeleton className="h-8 w-16" />
-                <Skeleton className="mt-1 h-4 w-24" />
-              </>
-            ) : (
-              <>
-                <div className="text-3xl font-bold">{stats?.alertsLast24h ?? 0}</div>
-                <p className="text-xs text-muted-foreground">Last 24 hours</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
+          {/* Watch Time */}
+          <Card>
+            <CardContent className="flex items-center justify-between py-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Watch Time</p>
+                {statsLoading ? (
+                  <Skeleton className="h-7 w-12 mt-1" />
+                ) : (
+                  <div className="text-2xl font-bold">
+                    {stats?.watchTimeHours ?? 0}
+                    <span className="text-lg font-normal text-muted-foreground">h</span>
+                  </div>
+                )}
+              </div>
+              <Clock className="h-5 w-5 text-muted-foreground" />
+            </CardContent>
+          </Card>
 
-        {/* Today's Plays */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Plays Today</CardTitle>
-            <Play className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <>
-                <Skeleton className="h-8 w-16" />
-                <Skeleton className="mt-1 h-4 w-24" />
-              </>
-            ) : (
-              <>
-                <div className="text-3xl font-bold">{stats?.todayPlays ?? 0}</div>
-                <p className="text-xs text-muted-foreground">Streams started</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Watch Time Today */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Watch Time</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <>
-                <Skeleton className="h-8 w-20" />
-                <Skeleton className="mt-1 h-4 w-24" />
-              </>
-            ) : (
-              <>
-                <div className="text-3xl font-bold">
-                  {stats?.watchTimeHours ?? 0}
-                  <span className="text-lg font-normal text-muted-foreground">h</span>
-                </div>
-                <p className="text-xs text-muted-foreground">Total today</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          {/* Active Users */}
+          <Card>
+            <CardContent className="flex items-center justify-between py-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Active Users</p>
+                {statsLoading ? (
+                  <Skeleton className="h-7 w-12 mt-1" />
+                ) : (
+                  <div className="text-2xl font-bold">{stats?.activeUsersToday ?? 0}</div>
+                )}
+              </div>
+              <Users className="h-5 w-5 text-muted-foreground" />
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
       {/* Now Playing Section */}
       <section>
@@ -172,17 +135,33 @@ export function Dashboard() {
         )}
       </section>
 
-      {/* Stream Map */}
-      <section>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle>Stream Locations</CardTitle>
-          </CardHeader>
-          <CardContent>
+      {/* Stream Map - only show when there are active streams */}
+      {hasActiveStreams && (
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <MapPin className="h-5 w-5 text-primary" />
+            <h2 className="text-lg font-semibold">Stream Locations</h2>
+          </div>
+          <Card className="overflow-hidden">
             <StreamCard sessions={sessions} height={320} />
-          </CardContent>
-        </Card>
-      </section>
+          </Card>
+        </section>
+      )}
+
+      {/* Server Resource Stats (Plex only) */}
+      {plexServer && (
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <Server className="h-5 w-5 text-primary" />
+            <h2 className="text-lg font-semibold">Server Resources</h2>
+          </div>
+          <ServerResourceCharts
+            data={serverStats?.data}
+            isLoading={statsChartLoading}
+            averages={averages}
+          />
+        </section>
+      )}
     </div>
   );
 }
