@@ -1,66 +1,15 @@
 import { useEffect, useMemo } from 'react';
-import { Link } from 'react-router';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, ZoomControl, CircleMarker, Popup } from 'react-leaflet';
+import { HeatmapLayer } from 'react-leaflet-heatmap-layer-v3';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { LocationStats } from '@tracearr/shared';
 import { cn } from '@/lib/utils';
-import { MapPin, User } from 'lucide-react';
-import { format } from 'date-fns';
 
-// Build image URL - handles both full URLs (Plex) and relative paths (Jellyfin)
-function getImageUrl(url: string | null): string | null {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  // For relative paths, we'd need serverId - for now just use the URL directly
-  // User thumbs from Plex are typically full URLs
-  return url;
-}
-
-// Fix for default marker icons in Leaflet with bundlers
-delete (L.Icon.Default.prototype as { _getIconUrl?: () => void })._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
+export type MapViewMode = 'heatmap' | 'circles';
 
 // Custom styles for dark theme and zoom control positioning
 const mapStyles = `
-  .leaflet-popup-content-wrapper {
-    background: hsl(var(--card));
-    border: 1px solid hsl(var(--border));
-    border-radius: 0.5rem;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
-    padding: 0;
-  }
-  .leaflet-popup-content {
-    margin: 0 !important;
-    min-width: 180px;
-    max-width: 260px;
-    line-height: 1.3 !important;
-  }
-  .leaflet-popup-content p {
-    margin: 0 !important;
-  }
-  .leaflet-popup-tip {
-    background: hsl(var(--card));
-    border: 1px solid hsl(var(--border));
-    border-top: none;
-    border-right: none;
-  }
-  .leaflet-popup-close-button {
-    color: hsl(var(--muted-foreground)) !important;
-    font-size: 16px !important;
-    top: 8px !important;
-    right: 8px !important;
-    width: 18px !important;
-    height: 18px !important;
-    line-height: 18px !important;
-  }
-  .leaflet-popup-close-button:hover {
-    color: hsl(var(--foreground)) !important;
-  }
   .leaflet-control-zoom {
     border: 1px solid hsl(var(--border)) !important;
     border-radius: 0.5rem !important;
@@ -83,13 +32,83 @@ interface StreamMapProps {
   locations: LocationStats[];
   className?: string;
   isLoading?: boolean;
+  viewMode?: MapViewMode;
 }
 
-// Calculate marker radius based on count (min 6, max 30)
-function getMarkerRadius(count: number, maxCount: number): number {
-  if (maxCount === 0) return 8;
-  const normalized = count / maxCount;
-  return Math.max(6, Math.min(30, 6 + normalized * 24));
+// Heatmap configuration optimized for streaming location data
+const HEATMAP_CONFIG = {
+  // Gradient: dark cyan base → bright cyan → white hotspots
+  // Designed for dark map tiles with good contrast
+  gradient: {
+    0.0: 'rgba(14, 116, 144, 0)',    // cyan-700 transparent (fade from nothing)
+    0.2: 'rgba(14, 116, 144, 0.8)',  // cyan-700
+    0.4: '#0891b2',                   // cyan-600
+    0.6: '#06b6d4',                   // cyan-500
+    0.8: '#22d3ee',                   // cyan-400
+    0.95: '#67e8f9',                  // cyan-300
+    1.0: '#ffffff',                   // white for hotspots
+  },
+  // Radius: larger for world view, heatmap auto-adjusts with zoom
+  radius: 30,
+  // Blur: soft edges for smooth transitions
+  blur: 20,
+  // minOpacity: ensure even low-activity areas are visible
+  minOpacity: 0.4,
+  // maxZoom: heatmap intensity calculation stops scaling at this zoom
+  maxZoom: 12,
+};
+
+// Circle markers layer component
+function CircleMarkersLayer({ locations }: { locations: LocationStats[] }) {
+  const maxCount = useMemo(() => Math.max(...locations.map((l) => l.count), 1), [locations]);
+
+  // Calculate radius based on count (scaled logarithmically)
+  const getRadius = (count: number) => {
+    const minRadius = 6;
+    const maxRadius = 25;
+    const scale = Math.log(count + 1) / Math.log(maxCount + 1);
+    return minRadius + scale * (maxRadius - minRadius);
+  };
+
+  // Get opacity based on count
+  const getOpacity = (count: number) => {
+    const minOpacity = 0.4;
+    const maxOpacity = 0.8;
+    const scale = count / maxCount;
+    return minOpacity + scale * (maxOpacity - minOpacity);
+  };
+
+  return (
+    <>
+      {locations
+        .filter((l) => l.lat && l.lon)
+        .map((location, index) => (
+          <CircleMarker
+            key={`${location.lat}-${location.lon}-${index}`}
+            center={[location.lat, location.lon]}
+            radius={getRadius(location.count)}
+            pathOptions={{
+              color: '#06b6d4', // cyan-500
+              fillColor: '#22d3ee', // cyan-400
+              fillOpacity: getOpacity(location.count),
+              weight: 1,
+            }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <div className="font-semibold">
+                  {location.city ? `${location.city}, ` : ''}
+                  {location.country || 'Unknown'}
+                </div>
+                <div className="text-muted-foreground">
+                  {location.count.toLocaleString()} stream{location.count !== 1 ? 's' : ''}
+                </div>
+              </div>
+            </Popup>
+          </CircleMarker>
+        ))}
+    </>
+  );
 }
 
 // Component to fit bounds when data changes
@@ -114,13 +133,7 @@ function MapBoundsUpdater({ locations, isLoading }: { locations: LocationStats[]
   return null;
 }
 
-export function StreamMap({ locations, className, isLoading }: StreamMapProps) {
-  // Calculate max count for marker sizing
-  const maxCount = useMemo(
-    () => Math.max(...locations.map((l) => l.count), 1),
-    [locations]
-  );
-
+export function StreamMap({ locations, className, isLoading, viewMode = 'heatmap' }: StreamMapProps) {
   const hasData = locations.length > 0;
 
   return (
@@ -141,105 +154,24 @@ export function StreamMap({ locations, className, isLoading }: StreamMapProps) {
 
         <MapBoundsUpdater locations={locations} isLoading={isLoading} />
 
-        {/* Location markers */}
-        {locations.map((location, idx) => {
-          if (!location.lat || !location.lon) return null;
-
-          const radius = getMarkerRadius(location.count, maxCount);
-          const locationKey = `${location.city}-${location.country}-${location.lat}-${location.lon}-${idx}`;
-
-          return (
-            <CircleMarker
-              key={locationKey}
-              center={[location.lat, location.lon]}
-              radius={radius}
-              pathOptions={{
-                fillColor: '#06b6d4', // cyan-500
-                fillOpacity: 0.7,
-                color: '#22d3ee', // cyan-400
-                weight: 2,
-              }}
-              eventHandlers={{
-                click: (e) => {
-                  // Open popup at marker center, not click position
-                  e.target.openPopup(e.target.getLatLng());
-                },
-              }}
-            >
-              <Popup>
-                <div className="p-2.5 text-foreground text-sm">
-                  {/* Location header */}
-                  <div className="flex items-center gap-1.5 pr-5">
-                    <MapPin className="h-3.5 w-3.5 text-cyan-500 flex-shrink-0" />
-                    <div className="min-w-0">
-                      <span className="font-semibold">{location.city || 'Unknown City'}</span>
-                      <span className="text-muted-foreground text-xs ml-1">
-                        {[location.region, location.country].filter(Boolean).join(', ') || 'Unknown'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Core stats with vertical divider */}
-                  <div className="mt-2 flex items-center justify-center gap-3 border-t border-border pt-2">
-                    <div className="text-center px-2">
-                      <span className="text-base font-semibold tabular-nums">{location.count}</span>
-                      <span className="text-[10px] text-muted-foreground ml-1">streams</span>
-                    </div>
-                    {location.deviceCount !== undefined && location.deviceCount > 0 && (
-                      <>
-                        <div className="h-4 w-px bg-border" />
-                        <div className="text-center px-2">
-                          <span className="text-base font-semibold tabular-nums">{location.deviceCount}</span>
-                          <span className="text-[10px] text-muted-foreground ml-1">devices</span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Users at this location - clickable with avatars */}
-                  {location.users && location.users.length > 0 && (
-                    <div className="mt-2 border-t border-border pt-2">
-                      <div className="flex flex-wrap gap-1">
-                        {location.users.map((user) => {
-                          const avatarUrl = getImageUrl(user.thumbUrl);
-                          return (
-                            <Link
-                              key={user.id}
-                              to={`/users/${user.id}`}
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/50 hover:bg-muted transition-colors"
-                            >
-                              <div className="flex h-4 w-4 items-center justify-center rounded-full bg-muted overflow-hidden flex-shrink-0">
-                                {avatarUrl ? (
-                                  <img src={avatarUrl} alt={user.username} className="h-4 w-4 object-cover" />
-                                ) : (
-                                  <User className="h-2.5 w-2.5 text-muted-foreground" />
-                                )}
-                              </div>
-                              <span className="text-xs">{user.username}</span>
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Time span */}
-                  {(location.firstActivity || location.lastActivity) && (
-                    <div className="mt-2 pt-1.5 border-t border-border text-[10px] text-muted-foreground text-center">
-                      {location.firstActivity && location.lastActivity ? (
-                        <span>
-                          {format(new Date(location.firstActivity), 'MMM d')} — {format(new Date(location.lastActivity), 'MMM d, yyyy')}
-                        </span>
-                      ) : location.lastActivity ? (
-                        <span>Last active {format(new Date(location.lastActivity), 'MMM d, yyyy')}</span>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
-              </Popup>
-            </CircleMarker>
-          );
-        })}
+        {/* Visualization layer - heatmap or circles */}
+        {hasData && viewMode === 'heatmap' && (
+          <HeatmapLayer
+            points={locations.filter((l) => l.lat && l.lon)}
+            latitudeExtractor={(l: LocationStats) => l.lat}
+            longitudeExtractor={(l: LocationStats) => l.lon}
+            // Logarithmic intensity: prevents high-count locations from dominating
+            intensityExtractor={(l: LocationStats) => Math.log10(l.count + 1)}
+            gradient={HEATMAP_CONFIG.gradient}
+            radius={HEATMAP_CONFIG.radius}
+            blur={HEATMAP_CONFIG.blur}
+            minOpacity={HEATMAP_CONFIG.minOpacity}
+            maxZoom={HEATMAP_CONFIG.maxZoom}
+            // Dynamic max based on log scale
+            max={Math.log10(Math.max(...locations.map((l) => l.count), 1) + 1)}
+          />
+        )}
+        {hasData && viewMode === 'circles' && <CircleMarkersLayer locations={locations} />}
       </MapContainer>
 
       {/* Loading overlay */}

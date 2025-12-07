@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { StreamMap } from '@/components/map';
+import { StreamMap, type MapViewMode } from '@/components/map';
 import {
   Select,
   SelectContent,
@@ -9,7 +9,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { X } from 'lucide-react';
+import { X, Flame, CircleDot } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useLocationStats } from '@/hooks/queries';
 
 const TIME_RANGES = [
@@ -27,6 +28,7 @@ const MEDIA_TYPES = [
 
 export function Map() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [viewMode, setViewMode] = useState<MapViewMode>('heatmap');
 
   // Parse filters from URL
   const filters = useMemo(() => {
@@ -174,6 +176,40 @@ export function Map() {
           </Button>
         )}
 
+        <div className="h-4 w-px bg-border" />
+
+        {/* View mode toggle */}
+        <div className="flex h-8 rounded-md border bg-muted/50 p-0.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setViewMode('heatmap')}
+            className={cn(
+              'h-7 px-2.5 gap-1.5 text-xs rounded-sm',
+              viewMode === 'heatmap'
+                ? 'bg-background shadow-sm text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-transparent'
+            )}
+          >
+            <Flame className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Heatmap</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setViewMode('circles')}
+            className={cn(
+              'h-7 px-2.5 gap-1.5 text-xs rounded-sm',
+              viewMode === 'circles'
+                ? 'bg-background shadow-sm text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-transparent'
+            )}
+          >
+            <CircleDot className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Circles</span>
+          </Button>
+        </div>
+
         {/* Summary stats - right side */}
         <div className="ml-auto flex items-center gap-4 text-sm">
           <div className="text-muted-foreground">
@@ -198,6 +234,7 @@ export function Map() {
         <StreamMap
           locations={locations}
           isLoading={locationsLoading}
+          viewMode={viewMode}
         />
       </div>
     </div>

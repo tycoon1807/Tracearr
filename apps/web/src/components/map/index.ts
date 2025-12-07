@@ -1,2 +1,2 @@
 export { StreamCard } from './StreamCard';
-export { StreamMap } from './StreamMap';
+export { StreamMap, type MapViewMode } from './StreamMap';
