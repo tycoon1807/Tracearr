@@ -9,7 +9,7 @@
 import type { Session } from '@tracearr/shared';
 import type { MediaSession } from '../../services/mediaServer/types.js';
 import type { ProcessedSession } from './types.js';
-import { isPrivateIP, parseJellyfinClient } from './utils.js';
+import { parseJellyfinClient } from './utils.js';
 import type { sessions } from '../../db/schema.js';
 
 // ============================================================================
@@ -105,7 +105,7 @@ function formatQualityString(quality: MediaSession['quality']): string {
  */
 export function mapMediaSession(
   session: MediaSession,
-  serverType: 'plex' | 'jellyfin'
+  serverType: 'plex' | 'jellyfin' | 'emby'
 ): ProcessedSession {
   const isEpisode = session.media.type === 'episode';
 
@@ -117,15 +117,13 @@ export function mapMediaSession(
   // Build quality string from resolution (preferred) or bitrate
   const quality = formatQualityString(session.quality);
 
-  // Filter private IPs for Jellyfin to avoid GeoIP lookup failures
-  const ipAddress = serverType === 'jellyfin' && isPrivateIP(session.network.ipAddress)
-    ? ''
-    : session.network.ipAddress;
+  // Keep the IP address - GeoIP service handles private IPs correctly
+  const ipAddress = session.network.ipAddress;
 
-  // Get platform/device - Jellyfin may need client string parsing
+  // Get platform/device - Jellyfin and Emby may need client string parsing
   let platform = session.player.platform ?? '';
   let device = session.player.device ?? '';
-  if (serverType === 'jellyfin' && session.player.product) {
+  if ((serverType === 'jellyfin' || serverType === 'emby') && session.player.product) {
     const parsed = parseJellyfinClient(session.player.product, device);
     platform = platform || parsed.platform;
     device = device || parsed.device;
