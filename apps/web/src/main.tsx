@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router';
 import { AuthProvider } from '@/hooks/useAuth';
+import { ServerProvider } from '@/hooks/useServer';
 import { SocketProvider } from '@/hooks/useSocket';
 import { App } from './App';
 import './styles/globals.css';
@@ -11,8 +12,12 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60,
-      retry: 1,
-      refetchOnWindowFocus: false,
+      // Retry failed queries with exponential backoff
+      retry: 3,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+      // Auto-refetch when reconnecting or window regains focus
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
     },
   },
 });
@@ -28,9 +33,11 @@ createRoot(root).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <SocketProvider>
-            <App />
-          </SocketProvider>
+          <ServerProvider>
+            <SocketProvider>
+              <App />
+            </SocketProvider>
+          </ServerProvider>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
