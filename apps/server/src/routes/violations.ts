@@ -183,8 +183,35 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
 
       const total = (countResult.rows[0] as { count: number })?.count ?? 0;
 
+      // Transform flat data into nested structure expected by frontend
+      const formattedData = violationData.map((v) => ({
+        id: v.id,
+        ruleId: v.ruleId,
+        serverUserId: v.serverUserId,
+        sessionId: v.sessionId,
+        severity: v.severity,
+        data: v.data,
+        createdAt: v.createdAt,
+        acknowledgedAt: v.acknowledgedAt,
+        rule: {
+          id: v.ruleId,
+          name: v.ruleName,
+          type: v.ruleType,
+        },
+        user: {
+          id: v.serverUserId,
+          username: v.username,
+          thumbUrl: v.userThumb,
+          serverId: v.serverId,
+        },
+        server: {
+          id: v.serverId,
+          name: v.serverName,
+        },
+      }));
+
       return {
-        data: violationData,
+        data: formattedData,
         page,
         pageSize,
         total,
