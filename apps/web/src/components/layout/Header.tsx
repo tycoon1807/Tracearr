@@ -11,6 +11,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ModeToggle } from '@/components/ui/mode-toggle';
+import { SidebarTrigger } from '@/components/ui/sidebar';
+import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/hooks/useAuth';
 
 export function Header() {
@@ -21,14 +23,17 @@ export function Header() {
     await logout();
   };
 
-  // Get initials for avatar fallback
   const initials = user?.username
     ? user.username.slice(0, 2).toUpperCase()
     : 'U';
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b px-6">
-      <div>{/* Breadcrumb or page title could go here */}</div>
+    <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+      <SidebarTrigger className="-ml-1" />
+      <Separator orientation="vertical" className="mr-2 h-4" />
+
+      <div className="flex-1" />
+
       <div className="flex items-center gap-4">
         <ModeToggle />
         <DropdownMenu>

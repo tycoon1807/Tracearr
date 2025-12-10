@@ -14,7 +14,7 @@ export function ServerSelector() {
 
   if (isLoading) {
     return (
-      <div className="px-3 py-2">
+      <div className="px-4 py-2">
         <Skeleton className="h-9 w-full" />
       </div>
     );
@@ -28,7 +28,7 @@ export function ServerSelector() {
   if (servers.length === 1) {
     const server = servers[0]!;
     return (
-      <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground">
         <Server className="h-4 w-4" />
         <span className="truncate font-medium">{server.name}</span>
       </div>
@@ -36,7 +36,7 @@ export function ServerSelector() {
   }
 
   return (
-    <div className="px-3 py-2">
+    <div className="px-4 py-2">
       <Select value={selectedServerId ?? undefined} onValueChange={selectServer}>
         <SelectTrigger className="h-9 w-full">
           <div className="flex items-center gap-2">
