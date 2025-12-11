@@ -5,10 +5,10 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { ActiveSession, LocationStats } from '@tracearr/shared';
 import { cn } from '@/lib/utils';
-import { tokenStorage } from '@/lib/api';
 import { ActiveSessionBadge } from '@/components/sessions/ActiveSessionBadge';
 import { useTheme } from '@/components/theme-provider';
 import { User, MapPin } from 'lucide-react';
+import { getAvatarUrl } from '@/components/users/utils';
 
 // Fix for default marker icons in Leaflet with bundlers
 delete (L.Icon.Default.prototype as { _getIconUrl?: () => void })._getIconUrl;
@@ -38,20 +38,6 @@ const locationIcon = L.divIcon({
   iconAnchor: [6, 6],
   popupAnchor: [0, -8],
 });
-
-// Build image URL - handles both full URLs (Plex) and relative paths (Jellyfin)
-function getImageUrl(url: string | null, serverId?: string): string | null {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  if (!serverId) return null;
-
-  const token = tokenStorage.getAccessToken();
-  if (!token) return null;
-
-  const path = url.startsWith('/') ? url.slice(1) : url;
-  const separator = path.includes('?') ? '&' : '?';
-  return `/api/v1/servers/${serverId}/image/${path}${separator}token=${token}`;
-}
 
 // Format media title based on type
 function formatMediaTitle(session: ActiveSession): { primary: string; secondary: string | null } {
@@ -213,7 +199,7 @@ export function StreamCard({
         {sessions?.map((session) => {
           if (!session.geoLat || !session.geoLon) return null;
 
-          const avatarUrl = getImageUrl(session.user.thumbUrl, session.serverId);
+          const avatarUrl = getAvatarUrl(session.serverId, session.user.thumbUrl, 32);
           const { primary: mediaTitle, secondary: mediaSubtitle } = formatMediaTitle(session);
 
           return (

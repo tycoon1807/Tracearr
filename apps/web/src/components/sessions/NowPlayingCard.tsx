@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Monitor, Smartphone, Tablet, Tv, Play, Pause, Zap, Server, X } from 'lucide-react';
+import { getAvatarUrl } from '@/components/users/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -97,8 +98,8 @@ export function NowPlayingCard({ session }: NowPlayingCardProps) {
     ? `/api/v1/images/proxy?server=${session.serverId}&url=${encodeURIComponent(session.thumbPath)}&width=200&height=300`
     : null;
 
-  // User avatar URL
-  const avatarUrl = session.user.thumbUrl || undefined;
+  // User avatar URL (proxied for Jellyfin/Emby)
+  const avatarUrl = getAvatarUrl(session.serverId, session.user.thumbUrl, 28) ?? undefined;
 
   const isPaused = session.state === 'paused';
 
