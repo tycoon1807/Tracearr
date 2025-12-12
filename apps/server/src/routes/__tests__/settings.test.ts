@@ -87,10 +87,6 @@ const mockSettingsRow = {
   customWebhookUrl: 'https://example.com/webhook',
   webhookFormat: 'json' as const,
   ntfyTopic: null,
-  notifyOnViolation: true,
-  notifyOnSessionStart: false,
-  notifyOnSessionStop: false,
-  notifyOnServerDown: true,
   pollerEnabled: true,
   pollerIntervalMs: 15000,
   tautulliUrl: 'http://localhost:8181',
@@ -126,7 +122,6 @@ describe('Settings Routes', () => {
       const body = response.json();
       expect(body.allowGuestAccess).toBe(false);
       expect(body.discordWebhookUrl).toBe('https://discord.com/api/webhooks/123');
-      expect(body.notifyOnViolation).toBe(true);
       expect(body.pollerEnabled).toBe(true);
       expect(body.pollerIntervalMs).toBe(15000);
       expect(body.externalUrl).toBe('https://tracearr.example.com');
@@ -177,10 +172,6 @@ describe('Settings Routes', () => {
         allowGuestAccess: false,
         discordWebhookUrl: null,
         customWebhookUrl: null,
-        notifyOnViolation: true,
-        notifyOnSessionStart: false,
-        notifyOnSessionStop: false,
-        notifyOnServerDown: true,
         pollerEnabled: true,
         pollerIntervalMs: 15000,
         tautulliUrl: null,
@@ -200,7 +191,6 @@ describe('Settings Routes', () => {
       expect(response.statusCode).toBe(200);
       const body = response.json();
       expect(body.allowGuestAccess).toBe(false);
-      expect(body.notifyOnViolation).toBe(true);
     });
 
     it('rejects guest accessing settings', async () => {
@@ -267,44 +257,6 @@ describe('Settings Routes', () => {
       expect(response.statusCode).toBe(200);
       const body = response.json();
       expect(body.allowGuestAccess).toBe(true);
-    });
-
-    it('updates notification settings', async () => {
-      app = await buildTestApp(ownerUser);
-
-      let selectCount = 0;
-      vi.mocked(db.select).mockImplementation(() => {
-        selectCount++;
-        const chain = {
-          from: vi.fn().mockReturnThis(),
-          where: vi.fn().mockReturnThis(),
-          limit: vi.fn().mockResolvedValue(
-            selectCount === 1
-              ? [mockSettingsRow]
-              : [{
-                  ...mockSettingsRow,
-                  notifyOnSessionStart: true,
-                  notifyOnSessionStop: true,
-                }]
-          ),
-        };
-        return chain as never;
-      });
-      mockDbUpdate();
-
-      const response = await app.inject({
-        method: 'PATCH',
-        url: '/settings',
-        payload: {
-          notifyOnSessionStart: true,
-          notifyOnSessionStop: true,
-        },
-      });
-
-      expect(response.statusCode).toBe(200);
-      const body = response.json();
-      expect(body.notifyOnSessionStart).toBe(true);
-      expect(body.notifyOnSessionStop).toBe(true);
     });
 
     it('updates webhook URLs', async () => {
