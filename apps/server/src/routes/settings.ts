@@ -40,10 +40,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
           .values({
             id: SETTINGS_ID,
             allowGuestAccess: false,
-            notifyOnViolation: true,
-            notifyOnSessionStart: false,
-            notifyOnSessionStop: false,
-            notifyOnServerDown: true,
           })
           .returning();
         settingsRow = inserted;
@@ -60,10 +56,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         customWebhookUrl: row.customWebhookUrl,
         webhookFormat: row.webhookFormat,
         ntfyTopic: row.ntfyTopic,
-        notifyOnViolation: row.notifyOnViolation,
-        notifyOnSessionStart: row.notifyOnSessionStart,
-        notifyOnSessionStop: row.notifyOnSessionStop,
-        notifyOnServerDown: row.notifyOnServerDown,
         pollerEnabled: row.pollerEnabled,
         pollerIntervalMs: row.pollerIntervalMs,
         tautulliUrl: row.tautulliUrl,
@@ -104,10 +96,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         customWebhookUrl: string | null;
         webhookFormat: 'json' | 'ntfy' | 'apprise' | null;
         ntfyTopic: string | null;
-        notifyOnViolation: boolean;
-        notifyOnSessionStart: boolean;
-        notifyOnSessionStop: boolean;
-        notifyOnServerDown: boolean;
         pollerEnabled: boolean;
         pollerIntervalMs: number;
         tautulliUrl: string | null;
@@ -138,22 +126,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
       if (body.data.ntfyTopic !== undefined) {
         updateData.ntfyTopic = body.data.ntfyTopic;
-      }
-
-      if (body.data.notifyOnViolation !== undefined) {
-        updateData.notifyOnViolation = body.data.notifyOnViolation;
-      }
-
-      if (body.data.notifyOnSessionStart !== undefined) {
-        updateData.notifyOnSessionStart = body.data.notifyOnSessionStart;
-      }
-
-      if (body.data.notifyOnSessionStop !== undefined) {
-        updateData.notifyOnSessionStop = body.data.notifyOnSessionStop;
-      }
-
-      if (body.data.notifyOnServerDown !== undefined) {
-        updateData.notifyOnServerDown = body.data.notifyOnServerDown;
       }
 
       if (body.data.pollerEnabled !== undefined) {
@@ -206,10 +178,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
           allowGuestAccess: updateData.allowGuestAccess ?? false,
           discordWebhookUrl: updateData.discordWebhookUrl ?? null,
           customWebhookUrl: updateData.customWebhookUrl ?? null,
-          notifyOnViolation: updateData.notifyOnViolation ?? true,
-          notifyOnSessionStart: updateData.notifyOnSessionStart ?? false,
-          notifyOnSessionStop: updateData.notifyOnSessionStop ?? false,
-          notifyOnServerDown: updateData.notifyOnServerDown ?? true,
         });
       } else {
         // Update existing
@@ -237,10 +205,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         customWebhookUrl: row.customWebhookUrl,
         webhookFormat: row.webhookFormat,
         ntfyTopic: row.ntfyTopic,
-        notifyOnViolation: row.notifyOnViolation,
-        notifyOnSessionStart: row.notifyOnSessionStart,
-        notifyOnSessionStop: row.notifyOnSessionStop,
-        notifyOnServerDown: row.notifyOnServerDown,
         pollerEnabled: row.pollerEnabled,
         pollerIntervalMs: row.pollerIntervalMs,
         tautulliUrl: row.tautulliUrl,
@@ -316,10 +280,6 @@ export async function getNetworkSettings(): Promise<{
  * Notification settings for internal use by NotificationDispatcher
  */
 export interface NotificationSettings {
-  notifyOnViolation: boolean;
-  notifyOnSessionStart: boolean;
-  notifyOnSessionStop: boolean;
-  notifyOnServerDown: boolean;
   discordWebhookUrl: string | null;
   customWebhookUrl: string | null;
   webhookFormat: 'json' | 'ntfy' | 'apprise' | null;
@@ -334,10 +294,6 @@ export interface NotificationSettings {
 export async function getNotificationSettings(): Promise<NotificationSettings> {
   const row = await db
     .select({
-      notifyOnViolation: settings.notifyOnViolation,
-      notifyOnSessionStart: settings.notifyOnSessionStart,
-      notifyOnSessionStop: settings.notifyOnSessionStop,
-      notifyOnServerDown: settings.notifyOnServerDown,
       discordWebhookUrl: settings.discordWebhookUrl,
       customWebhookUrl: settings.customWebhookUrl,
       webhookFormat: settings.webhookFormat,
@@ -352,10 +308,6 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
   if (!settingsRow) {
     // Return defaults if settings don't exist yet
     return {
-      notifyOnViolation: true,
-      notifyOnSessionStart: false,
-      notifyOnSessionStop: false,
-      notifyOnServerDown: true,
       discordWebhookUrl: null,
       customWebhookUrl: null,
       webhookFormat: null,
@@ -366,10 +318,6 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
   }
 
   return {
-    notifyOnViolation: settingsRow.notifyOnViolation,
-    notifyOnSessionStart: settingsRow.notifyOnSessionStart,
-    notifyOnSessionStop: settingsRow.notifyOnSessionStop,
-    notifyOnServerDown: settingsRow.notifyOnServerDown,
     discordWebhookUrl: settingsRow.discordWebhookUrl,
     customWebhookUrl: settingsRow.customWebhookUrl,
     webhookFormat: settingsRow.webhookFormat,
