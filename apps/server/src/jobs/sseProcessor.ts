@@ -457,29 +457,11 @@ async function createNewSession(
     server: { id: server.id, name: server.name, type: server.type as 'plex' },
   };
 
-  // Update cache
+  // Update cache atomically
   if (cacheService) {
-    await cacheService.setSessionById(inserted.id, activeSession);
+    // Add to active sessions SET + store session data (atomic)
+    await cacheService.addActiveSession(activeSession);
     await cacheService.addUserSession(serverUserId, inserted.id);
-
-    // Update active sessions list with deduplication
-    // Use composite key (serverId:sessionKey) to ensure uniqueness
-    const allActive = await cacheService.getActiveSessions();
-    const existingKeys = new Set(
-      (allActive ?? []).map((s) => `${s.serverId}:${s.sessionKey}`)
-    );
-    const newKey = `${activeSession.serverId}:${activeSession.sessionKey}`;
-
-    // Only add if not already present (prevents duplicates)
-    if (!existingKeys.has(newKey)) {
-      await cacheService.setActiveSessions([...(allActive ?? []), activeSession]);
-    } else {
-      // Session already exists - update it instead of adding duplicate
-      const updated = (allActive ?? []).map((s) =>
-        `${s.serverId}:${s.sessionKey}` === newKey ? activeSession : s
-      );
-      await cacheService.setActiveSessions(updated);
-    }
   }
 
   // Broadcast new session
@@ -551,10 +533,10 @@ async function updateExistingSession(
   if (cacheService) {
     let cached = await cacheService.getSessionById(existingSession.id);
 
-    // If cache miss, try to get from active sessions list
+    // If cache miss, try to get from active sessions SET
     if (!cached) {
-      const allActive = await cacheService.getActiveSessions();
-      cached = allActive?.find((s) => s.id === existingSession.id) || null;
+      const allActive = await cacheService.getAllActiveSessions();
+      cached = allActive.find((s) => s.id === existingSession.id) || null;
     }
 
     if (cached) {
@@ -567,15 +549,8 @@ async function updateExistingSession(
       cached.pausedDurationMs = pauseResult.pausedDurationMs;
       cached.watched = watched;
 
-      // Save to individual session cache
-      await cacheService.setSessionById(existingSession.id, cached);
-
-      // Update the active sessions list
-      const allActive = await cacheService.getActiveSessions();
-      if (allActive) {
-        const updated = allActive.map((s) => (s.id === existingSession.id ? cached : s));
-        await cacheService.setActiveSessions(updated);
-      }
+      // Atomic update: just update this session's data (ID already in SET)
+      await cacheService.updateActiveSession(cached);
 
       // Broadcast the update
       if (pubSubService) {
@@ -620,24 +595,23 @@ async function stopSession(existingSession: typeof sessions.$inferSelect): Promi
     })
     .where(eq(sessions.id, existingSession.id));
 
-  // Update cache
-  if (cacheService) {
-    await cacheService.deleteSessionById(existingSession.id);
-    await cacheService.removeUserSession(existingSession.serverUserId, existingSession.id);
+  // Get session details for notification BEFORE removing from cache
+  const cachedSession = await cacheService?.getSessionById(existingSession.id);
 
-    // Update active sessions list
-    const allActive = await cacheService.getActiveSessions();
-    await cacheService.setActiveSessions((allActive ?? []).filter(s => s.id !== existingSession.id));
+  // Update cache atomically (no more race condition)
+  if (cacheService) {
+    // Atomic remove from active sessions SET + delete session data
+    await cacheService.removeActiveSession(existingSession.id);
+    await cacheService.removeUserSession(existingSession.serverUserId, existingSession.id);
   }
 
   // Broadcast stopped
   if (pubSubService) {
     await pubSubService.publish('session:stopped', existingSession.id);
 
-    // Get session details for notification
-    const cached = await cacheService?.getSessionById(existingSession.id);
-    if (cached) {
-      await enqueueNotification({ type: 'session_stopped', payload: cached });
+    // Use cached session data for notification
+    if (cachedSession) {
+      await enqueueNotification({ type: 'session_stopped', payload: cachedSession });
     }
   }
 
