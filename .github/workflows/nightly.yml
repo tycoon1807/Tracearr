@@ -12,7 +12,8 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # github.repository must be lowercased for Docker registry compatibility
+  IMAGE_NAME: ${{ github.repository_owner }}/tracearr
 
 jobs:
   check-changes:
