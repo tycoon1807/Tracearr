@@ -51,10 +51,10 @@ export const TautulliHistoryRecordSchema = z.object({
   machine_id: z.string(),
   location: z.string(),
 
-  // Boolean-like flags (0/1)
-  live: z.number(),
-  secure: z.number(),
-  relayed: z.number(),
+  // Boolean-like flags (0/1) - can be null in some Tautulli versions
+  live: z.number().nullable(),
+  secure: z.number().nullable(),
+  relayed: z.number().nullable(),
 
   // Media info
   media_type: z.string(),
@@ -66,7 +66,7 @@ export const TautulliHistoryRecordSchema = z.object({
   title: z.string(),
   parent_title: z.string(),
   grandparent_title: z.string(),
-  original_title: z.string(),
+  original_title: z.string().nullable(),
   // year: number for movies, empty string "" for episodes
   year: numberOrEmptyString,
   // media_index: number for episodes, empty string for movies
