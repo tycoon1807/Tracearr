@@ -89,6 +89,49 @@ interface RuleFormData {
   isActive: boolean;
 }
 
+// Separate component for geo restriction to handle local state for comma input
+function GeoRestrictionInput({
+  params,
+  onChange,
+}: {
+  params: { blockedCountries: string[] };
+  onChange: (params: RuleParams) => void;
+}) {
+  const [inputValue, setInputValue] = useState(params.blockedCountries.join(', '));
+
+  const parseAndUpdate = (value: string) => {
+    const countries = value
+      .split(',')
+      .map((c) => c.trim().toUpperCase())
+      .filter(Boolean);
+    onChange({ ...params, blockedCountries: countries });
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="blockedCountries">Blocked Countries (comma-separated)</Label>
+      <Input
+        id="blockedCountries"
+        value={inputValue}
+        onChange={(e) => setInputValue(e.target.value)}
+        onBlur={() => {
+          parseAndUpdate(inputValue);
+          // Normalize the display after blur
+          const countries = inputValue
+            .split(',')
+            .map((c) => c.trim().toUpperCase())
+            .filter(Boolean);
+          setInputValue(countries.join(', '));
+        }}
+        placeholder="US, CN, RU"
+      />
+      <p className="text-xs text-muted-foreground">
+        ISO 3166-1 alpha-2 country codes separated by commas
+      </p>
+    </div>
+  );
+}
+
 function RuleParamsForm({
   type,
   params,
@@ -201,26 +244,10 @@ function RuleParamsForm({
       );
     case 'geo_restriction':
       return (
-        <div className="space-y-2">
-          <Label htmlFor="blockedCountries">Blocked Countries (comma-separated)</Label>
-          <Input
-            id="blockedCountries"
-            value={(params as { blockedCountries: string[] }).blockedCountries.join(', ')}
-            onChange={(e) =>
-              { onChange({
-                ...params,
-                blockedCountries: e.target.value
-                  .split(',')
-                  .map((c) => c.trim().toUpperCase())
-                  .filter(Boolean),
-              }); }
-            }
-            placeholder="US, CN, RU"
-          />
-          <p className="text-xs text-muted-foreground">
-            ISO 3166-1 alpha-2 country codes separated by commas
-          </p>
-        </div>
+        <GeoRestrictionInput
+          params={params as { blockedCountries: string[] }}
+          onChange={onChange}
+        />
       );
     default:
       return null;
