@@ -1,0 +1,61 @@
+# Tracearr - Supervised All-in-One Deployment (Portainer/Proxmox Ready)
+#
+# This is the EASIEST way to deploy Tracearr!
+#
+# The supervised image includes everything in a single container:
+# - TimescaleDB with Toolkit extension
+# - Redis
+# - Tracearr application
+#
+# Secrets are AUTO-GENERATED on first run - no configuration required!
+#
+# SETUP:
+# 1. Copy this file to your deployment location
+# 2. Deploy via Portainer Stack or: docker compose -f docker-compose.supervised-example.yml up -d
+# 3. Access Tracearr at http://your-server:3000
+#
+# That's it! No .env file needed for basic setup.
+#
+# OPTIONAL ENVIRONMENT VARIABLES:
+#   PORT=3000              # External port mapping
+#   TZ=UTC                 # Timezone (e.g., America/New_York, Europe/London)
+#   LOG_LEVEL=info         # Log level (debug, info, warn, error)
+#   JWT_SECRET=xxx         # Override auto-generated JWT secret
+#   COOKIE_SECRET=xxx      # Override auto-generated cookie secret
+
+services:
+  tracearr:
+    image: ghcr.io/connorgallopo/tracearr:supervised
+    container_name: tracearr
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - TZ=${TZ:-UTC}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Secrets are auto-generated if not provided
+      # Uncomment to override:
+      # - JWT_SECRET=${JWT_SECRET}
+      # - COOKIE_SECRET=${COOKIE_SECRET}
+    volumes:
+      # Docker managed volumes (recommended)
+      - tracearr_postgres:/data/postgres
+      - tracearr_redis:/data/redis
+      - tracearr_data:/data/tracearr
+      #
+      # Bind mount alternative - uncomment below and comment out the above
+      # Make sure the directories exist and have correct permissions
+      # - ./data/postgres:/data/postgres
+      # - ./data/redis:/data/redis
+      # - ./data/tracearr:/data/tracearr
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+volumes:
+  tracearr_postgres:
+  tracearr_redis:
+  tracearr_data:

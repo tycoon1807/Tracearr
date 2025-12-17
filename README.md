@@ -112,6 +112,10 @@ docker pull ghcr.io/connorgallopo/tracearr:latest
 docker pull ghcr.io/connorgallopo/tracearr:nightly
 ```
 
+### Portainer / Proxmox
+
+For one-click deployment via Portainer or Proxmox, see the ready-to-use compose files in [`docker/examples/`](docker/examples/). These use pre-built images only—no build context required.
+
 ### Development Setup
 
 ```bash
