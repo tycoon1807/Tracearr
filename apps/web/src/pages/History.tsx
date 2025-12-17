@@ -12,7 +12,7 @@ import {
   DEFAULT_COLUMN_VISIBILITY,
   type ColumnVisibility,
 } from '@/components/history/HistoryFilters';
-import { HistoryTable } from '@/components/history/HistoryTable';
+import { HistoryTable, type SortableColumn } from '@/components/history/HistoryTable';
 import { HistoryAggregates } from '@/components/history/HistoryAggregates';
 import { SessionDetailSheet } from '@/components/history/SessionDetailSheet';
 import {
@@ -204,6 +204,26 @@ export function History() {
     setSelectedSession(session);
   }, []);
 
+  // Handle sort column change - toggle direction if same column, otherwise set new column
+  const handleSortChange = useCallback(
+    (column: SortableColumn) => {
+      const currentOrderBy = filters.orderBy ?? 'startedAt';
+      const currentOrderDir = filters.orderDir ?? 'desc';
+      const newFilters = { ...filters };
+
+      if (currentOrderBy === column) {
+        // Toggle direction
+        newFilters.orderDir = currentOrderDir === 'desc' ? 'asc' : 'desc';
+      } else {
+        // New column - default to descending
+        newFilters.orderBy = column;
+        newFilters.orderDir = 'desc';
+      }
+      handleFiltersChange(newFilters);
+    },
+    [filters, handleFiltersChange]
+  );
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -244,6 +264,9 @@ export function History() {
             isFetchingNextPage={isFetchingNextPage}
             onSessionClick={handleSessionClick}
             columnVisibility={columnVisibility}
+            sortBy={filters.orderBy ?? 'startedAt'}
+            sortDir={filters.orderDir ?? 'desc'}
+            onSortChange={handleSortChange}
           />
 
           {/* Infinite scroll trigger */}

@@ -268,6 +268,16 @@ export function HistoryFiltersBar({
   const activeFilterCount = activeFilters.length + (filters.search ? 1 : 0);
   const hiddenColumnCount = Object.values(columnVisibility).filter((v) => !v).length;
 
+  // Sort users alphabetically (case-insensitive)
+  const sortedUsers = useMemo(() => {
+    if (!filterOptions?.users) return [];
+    return [...filterOptions.users].sort((a, b) => {
+      const nameA = (a.identityName || a.username || '').toLowerCase();
+      const nameB = (b.identityName || b.username || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+  }, [filterOptions?.users]);
+
   return (
     <div className="space-y-3">
       {/* Row 1: Time range, search, filter dropdown, and columns dropdown */}
@@ -330,7 +340,7 @@ export function HistoryFiltersBar({
                       Clear user filter
                     </DropdownMenuItem>
                     {filters.serverUserId && <DropdownMenuSeparator />}
-                    {filterOptions?.users?.map((user) => (
+                    {sortedUsers.map((user) => (
                       <DropdownMenuItem
                         key={user.id}
                         onClick={() => onFiltersChange({ ...filters, serverUserId: user.id })}

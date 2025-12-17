@@ -17,6 +17,9 @@ import {
   Globe,
   Clock,
   Eye,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import {
   Table,
@@ -41,12 +44,19 @@ import type { SessionWithDetails, SessionState, MediaType } from '@tracearr/shar
 import type { ColumnVisibility } from './HistoryFilters';
 import { format } from 'date-fns';
 
+// Sortable column keys that the API supports
+export type SortableColumn = 'startedAt' | 'durationMs' | 'mediaTitle';
+export type SortDirection = 'asc' | 'desc';
+
 interface Props {
   sessions: SessionWithDetails[];
   isLoading?: boolean;
   isFetchingNextPage?: boolean;
   onSessionClick?: (session: SessionWithDetails) => void;
   columnVisibility: ColumnVisibility;
+  sortBy?: SortableColumn;
+  sortDir?: SortDirection;
+  onSortChange?: (column: SortableColumn) => void;
 }
 
 // State icon component
@@ -260,7 +270,7 @@ export const HistoryTableRow = forwardRef<
 
       {/* Quality */}
       {columnVisibility.quality && (
-        <TableCell className="w-[100px]">
+        <TableCell className="w-[110px]">
           <Badge
             variant={session.isTranscode ? 'warning' : 'secondary'}
             className="gap-1 text-xs"
@@ -287,7 +297,7 @@ export const HistoryTableRow = forwardRef<
 
       {/* Duration */}
       {columnVisibility.duration && (
-        <TableCell className="w-[90px]">
+        <TableCell className="w-[100px]">
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-1.5">
@@ -315,7 +325,7 @@ export const HistoryTableRow = forwardRef<
 
       {/* Progress */}
       {columnVisibility.progress && (
-        <TableCell className="w-[80px]">
+        <TableCell className="w-[100px]">
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2">
@@ -406,12 +416,48 @@ function getVisibleColumnCount(columnVisibility: ColumnVisibility): number {
   return Object.values(columnVisibility).filter(Boolean).length;
 }
 
+// Sortable header component
+function SortableHeader({
+  column,
+  label,
+  currentSortBy,
+  currentSortDir,
+  onSortChange,
+}: {
+  column: SortableColumn;
+  label: string;
+  currentSortBy?: SortableColumn;
+  currentSortDir?: SortDirection;
+  onSortChange?: (column: SortableColumn) => void;
+}) {
+  const isActive = currentSortBy === column;
+  const Icon = isActive
+    ? currentSortDir === 'asc'
+      ? ArrowUp
+      : ArrowDown
+    : ArrowUpDown;
+
+  return (
+    <button
+      type="button"
+      className="flex items-center gap-1 hover:text-foreground transition-colors"
+      onClick={() => onSortChange?.(column)}
+    >
+      {label}
+      <Icon className={cn('h-3.5 w-3.5', isActive ? 'opacity-100' : 'opacity-40')} />
+    </button>
+  );
+}
+
 export function HistoryTable({
   sessions,
   isLoading,
   isFetchingNextPage,
   onSessionClick,
   columnVisibility,
+  sortBy,
+  sortDir,
+  onSortChange,
 }: Props) {
   const visibleColumnCount = getVisibleColumnCount(columnVisibility);
 
@@ -419,14 +465,54 @@ export function HistoryTable({
     <Table>
       <TableHeader>
         <TableRow>
-          {columnVisibility.date && <TableHead>Date</TableHead>}
-          {columnVisibility.user && <TableHead>User</TableHead>}
-          {columnVisibility.content && <TableHead>Content</TableHead>}
-          {columnVisibility.platform && <TableHead>Platform</TableHead>}
-          {columnVisibility.location && <TableHead>Location</TableHead>}
-          {columnVisibility.quality && <TableHead>Quality</TableHead>}
-          {columnVisibility.duration && <TableHead>Duration</TableHead>}
-          {columnVisibility.progress && <TableHead>Progress</TableHead>}
+          {columnVisibility.date && (
+            <TableHead className="w-[140px]">
+              <SortableHeader
+                column="startedAt"
+                label="Date"
+                currentSortBy={sortBy}
+                currentSortDir={sortDir}
+                onSortChange={onSortChange}
+              />
+            </TableHead>
+          )}
+          {columnVisibility.user && (
+            <TableHead className="w-[150px]">User</TableHead>
+          )}
+          {columnVisibility.content && (
+            <TableHead className="min-w-[200px]">
+              <SortableHeader
+                column="mediaTitle"
+                label="Content"
+                currentSortBy={sortBy}
+                currentSortDir={sortDir}
+                onSortChange={onSortChange}
+              />
+            </TableHead>
+          )}
+          {columnVisibility.platform && (
+            <TableHead className="w-[120px]">Platform</TableHead>
+          )}
+          {columnVisibility.location && (
+            <TableHead className="w-[130px]">Location</TableHead>
+          )}
+          {columnVisibility.quality && (
+            <TableHead className="w-[110px]">Quality</TableHead>
+          )}
+          {columnVisibility.duration && (
+            <TableHead className="w-[100px]">
+              <SortableHeader
+                column="durationMs"
+                label="Duration"
+                currentSortBy={sortBy}
+                currentSortDir={sortDir}
+                onSortChange={onSortChange}
+              />
+            </TableHead>
+          )}
+          {columnVisibility.progress && (
+            <TableHead className="w-[100px]">Progress</TableHead>
+          )}
         </TableRow>
       </TableHeader>
       <TableBody>

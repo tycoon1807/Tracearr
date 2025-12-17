@@ -342,7 +342,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
         isTranscode,
         watched,
         excludeShortSessions,
-        orderBy: _orderBy = 'startedAt',
+        orderBy = 'startedAt',
         orderDir = 'desc',
       } = query.data;
 
@@ -447,10 +447,22 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
         ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
         : sql``;
 
-      // Order clause based on orderBy and orderDir
-      const orderClause = orderDir === 'desc'
-        ? sql`ORDER BY MIN(s.started_at) DESC`
-        : sql`ORDER BY MIN(s.started_at) ASC`;
+      // Build ORDER BY clause based on orderBy parameter
+      // Note: Cursor pagination is based on started_at, so for other columns we use
+      // started_at as secondary sort to maintain consistent pagination
+      const buildOrderClause = () => {
+        const dir = orderDir === 'desc' ? sql`DESC` : sql`ASC`;
+        switch (orderBy) {
+          case 'durationMs':
+            return sql`ORDER BY SUM(COALESCE(s.duration_ms, 0)) ${dir}, MIN(s.started_at) DESC`;
+          case 'mediaTitle':
+            return sql`ORDER BY MIN(s.media_title) ${dir}, MIN(s.started_at) DESC`;
+          case 'startedAt':
+          default:
+            return sql`ORDER BY MIN(s.started_at) ${dir}`;
+        }
+      };
+      const orderClause = buildOrderClause();
 
       // Query grouped sessions with cursor pagination
       const result = await db.execute(sql`
