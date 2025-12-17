@@ -88,10 +88,12 @@ export interface MediaSession {
   quality: {
     /** Bitrate in kbps */
     bitrate: number;
-    /** Whether stream is being transcoded */
+    /** Whether stream is being transcoded (video or audio) */
     isTranscode: boolean;
-    /** Video decision (directplay, copy, transcode) - normalized to lowercase */
+    /** Video decision: 'directplay' | 'copy' | 'transcode' */
     videoDecision: string;
+    /** Audio decision: 'directplay' | 'copy' | 'transcode' */
+    audioDecision: string;
     /** Video resolution (e.g., "4k", "1080", "720", "480", "sd") */
     videoResolution?: string;
     /** Video height in pixels (for calculating resolution) */

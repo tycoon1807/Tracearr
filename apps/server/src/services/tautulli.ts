@@ -774,6 +774,10 @@ export class TautulliService {
             platform: record.platform,
             quality: record.transcode_decision === 'transcode' ? 'Transcode' : 'Direct',
             isTranscode: record.transcode_decision === 'transcode',
+            // Tautulli only provides combined decision - use same value for both
+            // 'direct play' → 'directplay' to match Plex/Jellyfin format
+            videoDecision: record.transcode_decision === 'direct play' ? 'directplay' : record.transcode_decision,
+            audioDecision: record.transcode_decision === 'direct play' ? 'directplay' : record.transcode_decision,
             bitrate: null,
           });
 

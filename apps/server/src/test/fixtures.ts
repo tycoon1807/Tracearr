@@ -71,6 +71,8 @@ export function createMockSession(overrides: Partial<Session> = {}): Session {
     platform: 'Windows',
     quality: '1080p',
     isTranscode: false,
+    videoDecision: 'directplay',
+    audioDecision: 'directplay',
     bitrate: 10000,
     ...overrides,
   };
@@ -220,7 +222,8 @@ export function createGeoRestrictionParams(
   overrides: Partial<GeoRestrictionParams> = {}
 ): GeoRestrictionParams {
   return {
-    blockedCountries: overrides.blockedCountries ?? [],
+    mode: overrides.mode ?? 'blocklist',
+    countries: overrides.countries ?? [],
   };
 }
 

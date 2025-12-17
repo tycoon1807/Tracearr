@@ -107,9 +107,13 @@ export function parseSession(item: Record<string, unknown>): MediaSession {
   const videoResolution = parseOptionalString(parseFirstArrayElement(item.Media, 'videoResolution'));
   const videoHeight = parseOptionalNumber(parseFirstArrayElement(item.Media, 'height'));
 
-  // Determine transcode status
+  // Determine transcode status - check both video and audio decisions
   const videoDecision = parseString(transcodeSession?.videoDecision, 'directplay');
-  const isTranscode = videoDecision !== 'directplay' && videoDecision !== 'copy';
+  const audioDecision = parseString(transcodeSession?.audioDecision, 'directplay');
+  // isTranscode = true if either video or audio is being transcoded (not just copied/remuxed)
+  const isTranscode =
+    (videoDecision !== 'directplay' && videoDecision !== 'copy') ||
+    (audioDecision !== 'directplay' && audioDecision !== 'copy');
 
   const session: MediaSession = {
     sessionKey: parseString(item.sessionKey),
@@ -147,6 +151,7 @@ export function parseSession(item: Record<string, unknown>): MediaSession {
       bitrate,
       isTranscode,
       videoDecision,
+      audioDecision,
       videoResolution,
       videoHeight,
     },

@@ -156,6 +156,8 @@ export function mapMediaSession(
     platform,
     quality,
     isTranscode: session.quality.isTranscode,
+    videoDecision: session.quality.videoDecision,
+    audioDecision: session.quality.audioDecision,
     bitrate: session.quality.bitrate,
     state: session.playback.state === 'paused' ? 'paused' : 'playing',
     totalDurationMs: session.media.durationMs,
@@ -217,6 +219,8 @@ export function mapSessionRow(s: typeof sessions.$inferSelect): Session {
     platform: s.platform,
     quality: s.quality,
     isTranscode: s.isTranscode,
+    videoDecision: s.videoDecision,
+    audioDecision: s.audioDecision,
     bitrate: s.bitrate,
   };
 }

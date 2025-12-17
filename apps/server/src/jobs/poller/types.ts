@@ -97,6 +97,10 @@ export interface ProcessedSession {
   quality: string;
   /** Whether stream is transcoded */
   isTranscode: boolean;
+  /** Video decision: 'directplay' | 'copy' | 'transcode' */
+  videoDecision: string;
+  /** Audio decision: 'directplay' | 'copy' | 'transcode' */
+  audioDecision: string;
   /** Bitrate in kbps */
   bitrate: number;
 

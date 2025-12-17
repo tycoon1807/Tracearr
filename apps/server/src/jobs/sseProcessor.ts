@@ -405,6 +405,8 @@ async function createNewSession(
       platform: processed.platform,
       quality: processed.quality,
       isTranscode: processed.isTranscode,
+      videoDecision: processed.videoDecision,
+      audioDecision: processed.audioDecision,
       bitrate: processed.bitrate,
     })
     .returning();
@@ -463,6 +465,8 @@ async function createNewSession(
     platform: processed.platform,
     quality: processed.quality,
     isTranscode: processed.isTranscode,
+    videoDecision: processed.videoDecision,
+    audioDecision: processed.audioDecision,
     bitrate: processed.bitrate,
     user: userDetail,
     server: { id: server.id, name: server.name, type: server.type as 'plex' },
