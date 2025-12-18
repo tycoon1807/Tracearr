@@ -1,7 +1,7 @@
 -- Migration: Change duration columns from INTEGER to BIGINT
 -- Required for Tautulli imports with large duration values (>2.1 billion ms)
 --
--- This migration handles TimescaleDB hypertables with compression and continuous aggregates.
+-- This migration handles TimescaleDB hypertables with compression/columnstore and continuous aggregates.
 -- Continuous aggregates are DERIVED data computed from sessions - they will be automatically
 -- recreated by the app on next startup and refreshed from source data. No data is lost.
 
@@ -20,7 +20,30 @@ END $$;
 
 --> statement-breakpoint
 
--- Step 2: Decompress all chunks (preserves all data, just uncompresses)
+-- Step 2: Disable columnstore (required for TimescaleDB 2.17+ with hypercore/columnstore)
+-- This must happen BEFORE decompression and ALTER TABLE operations
+DO $$
+BEGIN
+  -- Try to disable columnstore (TimescaleDB 2.17+)
+  EXECUTE 'ALTER TABLE sessions SET (timescaledb.enable_columnstore = false)';
+EXCEPTION
+  WHEN undefined_object THEN
+    -- Option doesn't exist (older TimescaleDB), skip
+    NULL;
+  WHEN invalid_parameter_value THEN
+    -- Table is not a hypertable or columnstore not applicable, skip
+    NULL;
+  WHEN SQLSTATE '42704' THEN
+    -- Table is not a hypertable (e.g., in test environment), skip
+    NULL;
+  WHEN OTHERS THEN
+    -- Any other error (columnstore not enabled, etc.), skip
+    NULL;
+END $$;
+
+--> statement-breakpoint
+
+-- Step 3: Decompress all chunks (preserves all data, just uncompresses)
 DO $$
 DECLARE
   chunk_id regclass;
@@ -44,7 +67,7 @@ END $$;
 
 --> statement-breakpoint
 
--- Step 3: Drop continuous aggregates that depend on duration_ms
+-- Step 4: Drop continuous aggregates that depend on duration_ms
 -- These are DERIVED data and will be recreated by initTimescaleDB() on app startup
 DROP MATERIALIZED VIEW IF EXISTS daily_plays_by_user CASCADE;
 --> statement-breakpoint
@@ -56,7 +79,7 @@ DROP MATERIALIZED VIEW IF EXISTS hourly_concurrent_streams CASCADE;
 
 --> statement-breakpoint
 
--- Step 4: Alter column types from INTEGER to BIGINT
+-- Step 5: Alter column types from INTEGER to BIGINT
 ALTER TABLE "sessions" ALTER COLUMN "duration_ms" SET DATA TYPE bigint;
 --> statement-breakpoint
 ALTER TABLE "sessions" ALTER COLUMN "total_duration_ms" SET DATA TYPE bigint;
@@ -65,6 +88,6 @@ ALTER TABLE "sessions" ALTER COLUMN "progress_ms" SET DATA TYPE bigint;
 --> statement-breakpoint
 ALTER TABLE "sessions" ALTER COLUMN "paused_duration_ms" SET DATA TYPE bigint;
 
--- Note: Compression policy and continuous aggregates will be automatically
+-- Note: Columnstore, compression policy, and continuous aggregates will be automatically
 -- recreated by initTimescaleDB() when the server starts. The aggregates
 -- will be refreshed with refreshAggregates() to rebuild from source data.
