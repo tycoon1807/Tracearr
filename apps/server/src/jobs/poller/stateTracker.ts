@@ -178,6 +178,41 @@ export function checkWatchCompletion(
 }
 
 // ============================================================================
+// Media Change Detection
+// ============================================================================
+
+/**
+ * Detect media change within the same sessionKey (e.g., Emby "Play Next Episode").
+ *
+ * Some media servers (notably Emby) reuse the same sessionKey when automatically
+ * playing the next episode in a series. This results in the same session showing
+ * different content (different ratingKey). We need to detect this and create
+ * separate session records for accurate play count tracking.
+ *
+ * @param existingRatingKey - ratingKey from the current active session
+ * @param newRatingKey - ratingKey from the incoming poll data
+ * @returns true if media has changed (different non-null ratingKeys)
+ *
+ * @example
+ * detectMediaChange('episode-1', 'episode-2'); // true - different episodes
+ * detectMediaChange('episode-1', 'episode-1'); // false - same episode
+ * detectMediaChange(null, 'episode-1');        // false - can't detect without existing
+ * detectMediaChange('episode-1', null);        // false - can't detect without new
+ */
+export function detectMediaChange(
+  existingRatingKey: string | null,
+  newRatingKey: string | null
+): boolean {
+  // Both must be non-null to detect a change
+  if (existingRatingKey === null || newRatingKey === null) {
+    return false;
+  }
+
+  // Different ratingKeys = different media
+  return existingRatingKey !== newRatingKey;
+}
+
+// ============================================================================
 // Quality Change Detection
 // ============================================================================
 

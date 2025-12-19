@@ -259,6 +259,47 @@ export interface SessionStopResult {
   wasUpdated: boolean;
 }
 
+/**
+ * Input for handling media change (e.g., Emby "Play Next Episode")
+ */
+export interface MediaChangeInput {
+  /** The existing session that will be stopped */
+  existingSession: typeof sessions.$inferSelect;
+  /** New media data from the poll */
+  processed: ProcessedSession;
+  /** Server info */
+  server: { id: string; name: string; type: 'plex' | 'jellyfin' | 'emby' };
+  /** Server user info */
+  serverUser: {
+    id: string;
+    username: string;
+    thumbUrl: string | null;
+    identityName: string | null;
+  };
+  /** GeoIP location data */
+  geo: GeoLocation;
+  /** Active rules to evaluate */
+  activeRules: Rule[];
+  /** Recent sessions for rule evaluation context */
+  recentSessions: Session[];
+}
+
+/**
+ * Result of handling a media change
+ */
+export interface MediaChangeResult {
+  /** The old session that was stopped */
+  stoppedSession: {
+    id: string;
+    serverUserId: string;
+    sessionKey: string;
+  };
+  /** The newly created session for the new media */
+  insertedSession: typeof sessions.$inferSelect;
+  /** Violations created during session creation */
+  violationResults: ViolationInsertResult[];
+}
+
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================

@@ -28,6 +28,8 @@ import type {
   QualityChangeResult,
   SessionStopInput,
   SessionStopResult,
+  MediaChangeInput,
+  MediaChangeResult,
 } from './types.js';
 
 // ============================================================================
@@ -512,6 +514,66 @@ export async function stopSessionAtomic(input: SessionStopInput): Promise<Sessio
   const wasUpdated = result.length > 0;
 
   return { durationMs, watched, shortSession, wasUpdated };
+}
+
+// ============================================================================
+// Media Change Handling
+// ============================================================================
+
+/**
+ * Handle media change scenario: stop old session, create new session.
+ *
+ * Used when sessionKey is reused but content changes (e.g., Emby "Play Next Episode").
+ * This is the inverse of quality change:
+ * - Quality change: Same ratingKey, different sessionKey
+ * - Media change: Same sessionKey, different ratingKey
+ *
+ * @param input - Media change input with existing session and new media data
+ * @returns Result with stopped session and newly created session, or null if stop failed
+ */
+export async function handleMediaChangeAtomic(
+  input: MediaChangeInput
+): Promise<MediaChangeResult | null> {
+  const { existingSession, processed, server, serverUser, geo, activeRules, recentSessions } =
+    input;
+
+  console.log(
+    `[SessionLifecycle] Media change detected: ${existingSession.ratingKey} -> ${processed.ratingKey}`
+  );
+
+  // STEP 1: Stop the old session atomically
+  const now = new Date();
+  const { wasUpdated } = await stopSessionAtomic({
+    session: existingSession,
+    stoppedAt: now,
+  });
+
+  if (!wasUpdated) {
+    console.log(
+      `[SessionLifecycle] Media change detected but session ${existingSession.id} was already stopped by another process.`
+    );
+    return null;
+  }
+
+  // STEP 2: Create new session for the new media
+  const { insertedSession, violationResults } = await createSessionWithRulesAtomic({
+    processed,
+    server,
+    serverUser,
+    geo,
+    activeRules,
+    recentSessions,
+  });
+
+  return {
+    stoppedSession: {
+      id: existingSession.id,
+      serverUserId: existingSession.serverUserId,
+      sessionKey: existingSession.sessionKey,
+    },
+    insertedSession,
+    violationResults,
+  };
 }
 
 // ============================================================================
