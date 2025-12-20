@@ -39,8 +39,6 @@ const CONFIG = {
 let testServerId: string;
 let testServerUserId: string;
 let testUserId: string;
-let initialMemory: number;
-
 /**
  * Measure query execution time
  */
@@ -79,8 +77,6 @@ describe('Poller Stress Test', () => {
     console.log(`   Historical sessions: ${CONFIG.HISTORICAL_SESSIONS}`);
     console.log(`   Concurrent streams: ${CONFIG.CONCURRENT_STREAMS}`);
     console.log(`   Poll cycles: ${CONFIG.POLL_CYCLES}\n`);
-
-    initialMemory = getMemoryUsageMB();
 
     // Create test user
     const [user] = await db
