@@ -267,6 +267,15 @@ export const HistoryTableRow = forwardRef<
         </TableCell>
       )}
 
+      {/* IP Address */}
+      {columnVisibility.ip && (
+        <TableCell className="w-[120px]">
+          <span className="text-muted-foreground font-mono text-xs">
+            {session.ipAddress || '—'}
+          </span>
+        </TableCell>
+      )}
+
       {/* Quality */}
       {columnVisibility.quality && (
         <TableCell className="w-[110px]">
@@ -385,6 +394,11 @@ function SkeletonRow({ columnVisibility }: { columnVisibility: ColumnVisibility 
           <Skeleton className="h-4 w-20" />
         </TableCell>
       )}
+      {columnVisibility.ip && (
+        <TableCell>
+          <Skeleton className="h-4 w-24" />
+        </TableCell>
+      )}
       {columnVisibility.quality && (
         <TableCell>
           <Skeleton className="h-5 w-20 rounded-full" />
@@ -482,6 +496,7 @@ export function HistoryTable({
           )}
           {columnVisibility.platform && <TableHead className="w-[120px]">Platform</TableHead>}
           {columnVisibility.location && <TableHead className="w-[130px]">Location</TableHead>}
+          {columnVisibility.ip && <TableHead className="w-[120px]">IP Address</TableHead>}
           {columnVisibility.quality && <TableHead className="w-[110px]">Quality</TableHead>}
           {columnVisibility.duration && (
             <TableHead className="w-[100px]">
