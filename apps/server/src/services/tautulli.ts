@@ -617,7 +617,7 @@ export class TautulliService {
             ipAddress: record.ip_address || '0.0.0.0',
             geoCity: geo.city,
             geoRegion: geo.region,
-            geoCountry: geo.countryCode,
+            geoCountry: geo.countryCode ?? geo.country,
             geoLat: geo.lat,
             geoLon: geo.lon,
             playerName: record.player || record.product,
