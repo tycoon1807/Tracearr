@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import '@tracearr/shared';
+import type { MediaType } from '@tracearr/shared';
 import { api, type StatsTimeRange, getBrowserTimezone } from '@/lib/api';
 
 // Re-export for backwards compatibility and convenience
@@ -101,6 +101,42 @@ export function useConcurrentStats(timeRange?: StatsTimeRange, serverId?: string
   return useQuery({
     queryKey: ['stats', 'concurrent', timeRange, serverId],
     queryFn: () => api.stats.concurrent(timeRange ?? { period: 'month' }, serverId ?? undefined),
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+export interface EngagementStatsOptions {
+  mediaType?: MediaType;
+  limit?: number;
+}
+
+export function useEngagementStats(
+  timeRange?: StatsTimeRange,
+  serverId?: string | null,
+  options?: EngagementStatsOptions
+) {
+  return useQuery({
+    queryKey: ['stats', 'engagement', timeRange, serverId, options],
+    queryFn: () =>
+      api.stats.engagement(timeRange ?? { period: 'week' }, serverId ?? undefined, options),
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+export interface ShowStatsOptions {
+  limit?: number;
+  orderBy?: 'totalEpisodeViews' | 'totalWatchHours' | 'bingeScore' | 'uniqueViewers';
+}
+
+export function useShowStats(
+  timeRange?: StatsTimeRange,
+  serverId?: string | null,
+  options?: ShowStatsOptions
+) {
+  return useQuery({
+    queryKey: ['stats', 'shows', timeRange, serverId, options],
+    queryFn: () =>
+      api.stats.shows(timeRange ?? { period: 'month' }, serverId ?? undefined, options),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }

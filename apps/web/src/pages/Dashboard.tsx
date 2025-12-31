@@ -53,6 +53,11 @@ export function Dashboard() {
             label="Plays"
             value={stats?.todayPlays ?? 0}
             isLoading={statsLoading}
+            subValue={
+              stats?.todaySessions && stats.todaySessions > stats.todayPlays
+                ? `${stats.todaySessions} sessions`
+                : undefined
+            }
           />
           <StatCard
             icon={Clock}

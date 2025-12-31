@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import {
   PlaysChart,
@@ -7,6 +7,8 @@ import {
   HourOfDayChart,
   QualityChart,
   ConcurrentChart,
+  EngagementBreakdownChart,
+  PlaysVsSessionsChart,
 } from '@/components/charts';
 import {
   usePlaysStats,
@@ -15,6 +17,7 @@ import {
   usePlatformStats,
   useQualityStats,
   useConcurrentStats,
+  useEngagementStats,
 } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
@@ -30,6 +33,7 @@ export function StatsActivity() {
   const platforms = usePlatformStats(apiParams, selectedServerId);
   const quality = useQualityStats(apiParams, selectedServerId);
   const concurrent = useConcurrentStats(apiParams, selectedServerId);
+  const engagement = useEngagementStats(apiParams, selectedServerId);
 
   // Transform data for charts
   const platformData = platforms.data?.map((p) => ({
@@ -78,6 +82,37 @@ export function StatsActivity() {
               isLoading={concurrent.isLoading}
               height={250}
               period={timeRange.period}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Engagement Breakdown */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium">Engagement Breakdown</CardTitle>
+            <CardDescription>How users engage with content</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <EngagementBreakdownChart
+              data={engagement.data?.engagementBreakdown}
+              isLoading={engagement.isLoading}
+              height={250}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Plays vs Sessions */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium">Plays vs Sessions</CardTitle>
+            <CardDescription>Validated plays vs raw session count</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <PlaysVsSessionsChart
+              plays={engagement.data?.summary.totalPlays ?? 0}
+              sessions={engagement.data?.summary.totalAllSessions ?? 0}
+              isLoading={engagement.isLoading}
+              height={200}
             />
           </CardContent>
         </Card>

@@ -11,8 +11,12 @@ export {
   useTopUsers,
   useTopContent,
   useConcurrentStats,
+  useEngagementStats,
+  useShowStats,
   type LocationStatsFilters,
   type StatsTimeRange,
+  type EngagementStatsOptions,
+  type ShowStatsOptions,
 } from './useStats';
 
 // Session hooks

@@ -14,6 +14,8 @@ interface MediaCardSmallProps {
   style?: React.CSSProperties;
   /** For TV shows (aggregated series), number of unique episodes watched */
   episodeCount?: number;
+  /** Binge score for shows */
+  bingeScore?: number;
 }
 
 function MediaIcon({ type, className }: { type: string; className?: string }) {
@@ -36,7 +38,7 @@ function getImageUrl(
   height = 225
 ) {
   if (!serverId || !thumbPath) return null;
-  return `/api/v1/images/proxy?server=${serverId}&url=${encodeURIComponent(thumbPath)}&width=${width}&height=${height}&fallback=poster`;
+  return `/api/v1/images/proxy?server=${encodeURIComponent(serverId)}&url=${encodeURIComponent(thumbPath)}&width=${width}&height=${height}&fallback=poster`;
 }
 
 export function MediaCardSmall({
@@ -51,6 +53,7 @@ export function MediaCardSmall({
   className,
   style,
   episodeCount,
+  bingeScore,
 }: MediaCardSmallProps) {
   const imageUrl = getImageUrl(serverId, thumbPath);
   // For individual episodes: showTitle is series name, title is episode name
@@ -87,11 +90,19 @@ export function MediaCardSmall({
           </div>
         )}
 
-        {/* Hover overlay with play count */}
+        {/* Hover overlay with stats */}
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity group-hover:opacity-100">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-white">{playCount}</div>
-            <div className="text-xs text-white/80">plays</div>
+          <div className="space-y-1 text-center">
+            <div>
+              <div className="text-2xl font-bold text-white">{playCount}</div>
+              <div className="text-xs text-white/80">{episodeCount ? 'episodes' : 'plays'}</div>
+            </div>
+            {bingeScore !== undefined && bingeScore > 0 && (
+              <div>
+                <div className="text-lg font-bold text-orange-400">{bingeScore.toFixed(1)}</div>
+                <div className="text-xs text-white/80">binge score</div>
+              </div>
+            )}
           </div>
         </div>
       </div>

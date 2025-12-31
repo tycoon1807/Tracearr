@@ -46,6 +46,13 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
             'Run this if imported sessions from Tautulli show "0%" progress despite having watch time. ' +
             'This recalculates progress values for sessions that were imported before this was fixed.',
         },
+        {
+          type: 'rebuild_timescale_views',
+          name: 'Rebuild TimescaleDB Views',
+          description:
+            'Recreates all TimescaleDB continuous aggregates and engagement views. ' +
+            'Run this after upgrading if you see database errors about missing views or columns.',
+        },
       ],
     };
   });
@@ -69,6 +76,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         'normalize_players',
         'normalize_countries',
         'fix_imported_progress',
+        'rebuild_timescale_views',
       ];
       if (!validTypes.includes(type as MaintenanceJobType)) {
         return reply.badRequest(`Invalid job type: ${type}`);
@@ -116,6 +124,12 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const { jobId } = request.params;
+
+      // Validate jobId format (alphanumeric with dashes)
+      if (!jobId || !/^[\w-]+$/.test(jobId) || jobId.length > 100) {
+        return reply.badRequest('Invalid job ID format');
+      }
+
       const status = await getMaintenanceJobStatus(jobId);
 
       if (!status) {

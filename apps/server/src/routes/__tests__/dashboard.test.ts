@@ -36,6 +36,19 @@ vi.mock('../../services/cache.js', () => ({
   })),
 }));
 
+// Mock db.execute for engagement aggregate queries
+const mockDbExecute = vi.fn().mockResolvedValue({ rows: [{ count: 0 }] });
+vi.mock('../../db/client.js', () => ({
+  db: {
+    execute: (...args: unknown[]) => mockDbExecute(...args),
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([]),
+      }),
+    }),
+  },
+}));
+
 // Import the mocked modules and the routes
 import {
   playsCountSince,
@@ -159,6 +172,7 @@ describe('Dashboard Stats Routes', () => {
       const cachedStats: DashboardStats = {
         activeStreams: 5,
         todayPlays: 25,
+        todaySessions: 30,
         watchTimeHours: 12.5,
         alertsLast24h: 3,
         activeUsersToday: 8,
@@ -198,6 +212,7 @@ describe('Dashboard Stats Routes', () => {
       vi.mocked(watchTimeSince.execute).mockResolvedValue([{ totalMs: 18000000 }]); // 5 hours
       vi.mocked(violationsCountSince.execute).mockResolvedValue([{ count: 2 }]);
       vi.mocked(uniqueUsersSince.execute).mockResolvedValue([{ count: 6 }]);
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ count: 15 }] }); // Engagement validated plays
 
       app = await buildTestApp(ownerUser, redisMock);
 
@@ -238,6 +253,7 @@ describe('Dashboard Stats Routes', () => {
       vi.mocked(watchTimeSince.execute).mockResolvedValue([{ totalMs: 7200000 }]); // 2 hours
       vi.mocked(violationsCountSince.execute).mockResolvedValue([{ count: 0 }]);
       vi.mocked(uniqueUsersSince.execute).mockResolvedValue([{ count: 3 }]);
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ count: 10 }] }); // Engagement validated plays
 
       app = await buildTestApp(ownerUser, redisMock);
 
@@ -268,6 +284,7 @@ describe('Dashboard Stats Routes', () => {
       vi.mocked(watchTimeSince.execute).mockResolvedValue([{ totalMs: 3600000 }]);
       vi.mocked(violationsCountSince.execute).mockResolvedValue([{ count: 1 }]);
       vi.mocked(uniqueUsersSince.execute).mockResolvedValue([{ count: 2 }]);
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ count: 5 }] }); // Engagement validated plays
 
       app = await buildTestApp(ownerUser, redisMock);
 
@@ -296,6 +313,7 @@ describe('Dashboard Stats Routes', () => {
       vi.mocked(watchTimeSince.execute).mockResolvedValue([{ totalMs: 0 }]);
       vi.mocked(violationsCountSince.execute).mockResolvedValue([{ count: 0 }]);
       vi.mocked(uniqueUsersSince.execute).mockResolvedValue([{ count: 4 }]);
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ count: 8 }] }); // Engagement validated plays
 
       app = await buildTestApp(ownerUser, redisMock);
 
@@ -322,6 +340,7 @@ describe('Dashboard Stats Routes', () => {
       vi.mocked(watchTimeSince.execute).mockResolvedValue([]);
       vi.mocked(violationsCountSince.execute).mockResolvedValue([]);
       vi.mocked(uniqueUsersSince.execute).mockResolvedValue([]);
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // Engagement validated plays
 
       app = await buildTestApp(ownerUser, redisMock);
 
@@ -351,6 +370,7 @@ describe('Dashboard Stats Routes', () => {
       vi.mocked(watchTimeSince.execute).mockResolvedValue([{ totalMs: 20000000 }]);
       vi.mocked(violationsCountSince.execute).mockResolvedValue([{ count: 0 }]);
       vi.mocked(uniqueUsersSince.execute).mockResolvedValue([{ count: 0 }]);
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // Engagement validated plays
 
       app = await buildTestApp(ownerUser, redisMock);
 

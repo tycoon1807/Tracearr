@@ -2,7 +2,7 @@ import { Film, Tv } from 'lucide-react';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { MediaCard, MediaCardSmall } from '@/components/media';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useTopContent } from '@/hooks/queries';
+import { useTopContent, useShowStats } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
 
@@ -10,10 +10,12 @@ export function StatsLibrary() {
   const { value: timeRange, setValue: setTimeRange, apiParams } = useTimeRange();
   const { selectedServerId } = useServer();
   const topContent = useTopContent(apiParams, selectedServerId);
+  const showStats = useShowStats(apiParams, selectedServerId, { limit: 10 });
 
   // Use separate movies and shows arrays from API
   const movies = topContent.data?.movies ?? [];
-  const shows = topContent.data?.shows ?? [];
+  // Engagement-based show stats (preferred when available)
+  const showsFromEngagement = showStats.data?.data ?? [];
 
   return (
     <div className="space-y-8">
@@ -98,7 +100,7 @@ export function StatsLibrary() {
           <h2 className="text-lg font-semibold">Top TV Shows</h2>
         </div>
 
-        {topContent.isLoading ? (
+        {topContent.isLoading || showStats.isLoading ? (
           <div className="space-y-4">
             <Skeleton className="h-44 w-full rounded-xl" />
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
@@ -107,8 +109,60 @@ export function StatsLibrary() {
               ))}
             </div>
           </div>
-        ) : (
+        ) : showsFromEngagement.length > 0 ? (
+          // Render engagement-based show stats
           (() => {
+            const topShow = showsFromEngagement[0];
+            if (!topShow) {
+              return (
+                <div className="rounded-xl border border-dashed p-8 text-center">
+                  <Tv className="text-muted-foreground/50 mx-auto h-12 w-12" />
+                  <p className="text-muted-foreground mt-2">No TV show plays in this period</p>
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-4">
+                <MediaCard
+                  title={topShow.showTitle}
+                  type="episode"
+                  year={topShow.year}
+                  playCount={topShow.totalEpisodeViews}
+                  watchTimeHours={topShow.totalWatchHours}
+                  thumbPath={topShow.thumbPath}
+                  serverId={topShow.serverId}
+                  rank={1}
+                  episodeCount={topShow.totalEpisodeViews}
+                  bingeScore={topShow.bingeScore}
+                  completionRate={Math.round(topShow.avgCompletionRate)}
+                />
+
+                {showsFromEngagement.length > 1 && (
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,180px))] gap-4">
+                    {showsFromEngagement.slice(1, 10).map((show, idx) => (
+                      <MediaCardSmall
+                        key={`${show.showTitle}-${show.year}`}
+                        title={show.showTitle}
+                        type="episode"
+                        year={show.year}
+                        playCount={show.totalEpisodeViews}
+                        thumbPath={show.thumbPath}
+                        serverId={show.serverId}
+                        rank={idx + 2}
+                        episodeCount={show.totalEpisodeViews}
+                        bingeScore={show.bingeScore}
+                        style={{ animationDelay: `${idx * 50}ms` }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()
+        ) : (
+          // Fallback to legacy top content shows
+          (() => {
+            const shows = topContent.data?.shows ?? [];
             const topShow = shows[0];
             if (!topShow) {
               return (
@@ -120,7 +174,6 @@ export function StatsLibrary() {
             }
             return (
               <div className="space-y-4">
-                {/* Featured #1 show - title is the series name */}
                 <MediaCard
                   title={topShow.title}
                   type={topShow.type}
@@ -133,10 +186,9 @@ export function StatsLibrary() {
                   episodeCount={topShow.episodeCount}
                 />
 
-                {/* Grid of remaining shows */}
                 {shows.length > 1 && (
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,180px))] gap-4">
-                    {shows.slice(1, 10).map((show, idx: number) => (
+                    {shows.slice(1, 10).map((show, idx) => (
                       <MediaCardSmall
                         key={`${show.title}-${show.year}`}
                         title={show.title}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -61,6 +61,7 @@ const JOB_ICONS: Record<string, typeof Database> = {
   normalize_players: Database,
   normalize_countries: Globe,
   fix_imported_progress: RefreshCw,
+  rebuild_timescale_views: Database,
 };
 
 function formatDuration(ms: number): string {
@@ -99,7 +100,7 @@ export function JobsSettings() {
   }, []);
 
   // Fetch job history
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     try {
       const result = await api.maintenance.getHistory();
       setHistory(result.history);
@@ -108,7 +109,7 @@ export function JobsSettings() {
     } finally {
       setIsLoadingHistory(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void fetchHistory();
@@ -157,7 +158,7 @@ export function JobsSettings() {
     return () => {
       socket.off('maintenance:progress', handleProgress);
     };
-  }, [socket]);
+  }, [socket, fetchHistory]);
 
   const handleStartJob = async (type: string) => {
     setConfirmJob(null);

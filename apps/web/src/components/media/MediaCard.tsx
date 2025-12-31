@@ -1,5 +1,6 @@
 import { Film, Tv, Music } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface MediaCardProps {
   title: string;
@@ -14,6 +15,9 @@ interface MediaCardProps {
   className?: string;
   /** For TV shows (aggregated series), number of unique episodes watched */
   episodeCount?: number;
+  /** Engagement stats for shows */
+  bingeScore?: number;
+  completionRate?: number;
 }
 
 function MediaIcon({ type, className }: { type: string; className?: string }) {
@@ -36,7 +40,7 @@ function getImageUrl(
   height = 450
 ) {
   if (!serverId || !thumbPath) return null;
-  return `/api/v1/images/proxy?server=${serverId}&url=${encodeURIComponent(thumbPath)}&width=${width}&height=${height}&fallback=poster`;
+  return `/api/v1/images/proxy?server=${encodeURIComponent(serverId)}&url=${encodeURIComponent(thumbPath)}&width=${width}&height=${height}&fallback=poster`;
 }
 
 export function MediaCard({
@@ -51,6 +55,8 @@ export function MediaCard({
   rank,
   className,
   episodeCount,
+  bingeScore,
+  completionRate,
 }: MediaCardProps) {
   const imageUrl = getImageUrl(serverId, thumbPath, 300, 450);
   const bgImageUrl = getImageUrl(serverId, thumbPath, 800, 400);
@@ -115,12 +121,37 @@ export function MediaCard({
           </div>
           <h3 className="mt-1 text-lg leading-tight font-semibold">{displayTitle}</h3>
           {subtitle && <p className="text-muted-foreground text-sm">{subtitle}</p>}
-          <div className="mt-3 flex items-center gap-4 text-sm">
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             <div>
               <span className="text-primary font-semibold">{playCount.toLocaleString()}</span>
-              <span className="text-muted-foreground ml-1">plays</span>
+              <span className="text-muted-foreground ml-1">
+                {episodeCount ? 'episodes' : 'plays'}
+              </span>
             </div>
             <div className="text-muted-foreground">{watchTimeHours.toLocaleString()}h watched</div>
+            {bingeScore !== undefined && bingeScore > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="cursor-help">
+                    <span className="font-semibold text-orange-500">{bingeScore.toFixed(1)}</span>
+                    <span className="text-muted-foreground ml-1">binge score</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="text-sm">
+                    Measures binge-watching intensity based on viewing patterns: episode volume,
+                    daily intensity, consecutive watches, and velocity. Higher scores indicate
+                    stronger engagement.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {completionRate !== undefined && completionRate > 0 && (
+              <div>
+                <span className="font-semibold text-green-500">{completionRate}%</span>
+                <span className="text-muted-foreground ml-1">completed</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

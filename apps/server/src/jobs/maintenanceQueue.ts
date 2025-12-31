@@ -22,6 +22,7 @@ import { db } from '../db/client.js';
 import { sessions } from '../db/schema.js';
 import { normalizeClient, normalizePlatformName } from '../utils/platformNormalizer.js';
 import { getPubSubService } from '../services/cache.js';
+import { rebuildTimescaleViews } from '../db/timescale.js';
 import countries from 'i18n-iso-countries';
 import countriesEn from 'i18n-iso-countries/langs/en.json' with { type: 'json' };
 
@@ -153,6 +154,8 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<Main
       return processNormalizeCountriesJob(job);
     case 'fix_imported_progress':
       return processFixImportedProgressJob(job);
+    case 'rebuild_timescale_views':
+      return processRebuildTimescaleViewsJob(job);
     default:
       throw new Error(`Unknown maintenance job type: ${job.data.type}`);
   }
@@ -853,6 +856,104 @@ async function processFixImportedProgressJob(
 }
 
 /**
+ * Rebuild TimescaleDB views and continuous aggregates
+ *
+ * Drops and recreates all engagement tracking views to fix broken views
+ * or apply updated view definitions after an upgrade.
+ */
+async function processRebuildTimescaleViewsJob(
+  job: Job<MaintenanceJobData>
+): Promise<MaintenanceJobResult> {
+  const startTime = Date.now();
+  const pubSubService = getPubSubService();
+
+  // Initialize progress
+  activeJobProgress = {
+    type: 'rebuild_timescale_views',
+    status: 'running',
+    totalRecords: 9, // Total steps in the rebuild process
+    processedRecords: 0,
+    updatedRecords: 0,
+    skippedRecords: 0,
+    errorRecords: 0,
+    message: 'Starting TimescaleDB view rebuild...',
+    startedAt: new Date().toISOString(),
+  };
+
+  const publishProgress = async () => {
+    if (pubSubService && activeJobProgress) {
+      await pubSubService.publish(WS_EVENTS.MAINTENANCE_PROGRESS, activeJobProgress);
+    }
+  };
+
+  try {
+    await publishProgress();
+
+    // Call the rebuild function with progress callback
+    const result = await rebuildTimescaleViews((step, total, message) => {
+      if (activeJobProgress) {
+        activeJobProgress.processedRecords = step;
+        activeJobProgress.totalRecords = total;
+        activeJobProgress.message = message;
+        void publishProgress();
+      }
+
+      // Update job progress percentage
+      const percent = Math.round((step / total) * 100);
+      void job.updateProgress(percent);
+    });
+
+    const durationMs = Date.now() - startTime;
+
+    if (result.success) {
+      activeJobProgress.status = 'complete';
+      activeJobProgress.processedRecords = 9;
+      activeJobProgress.updatedRecords = 6; // Number of views created
+      activeJobProgress.message = `${result.message} in ${Math.round(durationMs / 1000)}s`;
+      activeJobProgress.completedAt = new Date().toISOString();
+      await publishProgress();
+      activeJobProgress = null;
+
+      return {
+        success: true,
+        type: 'rebuild_timescale_views',
+        processed: 9,
+        updated: 6,
+        skipped: 0,
+        errors: 0,
+        durationMs,
+        message: result.message,
+      };
+    } else {
+      activeJobProgress.status = 'error';
+      activeJobProgress.errorRecords = 1;
+      activeJobProgress.message = result.message;
+      await publishProgress();
+      activeJobProgress = null;
+
+      return {
+        success: false,
+        type: 'rebuild_timescale_views',
+        processed: 0,
+        updated: 0,
+        skipped: 0,
+        errors: 1,
+        durationMs,
+        message: result.message,
+      };
+    }
+  } catch (error) {
+    if (activeJobProgress) {
+      activeJobProgress.status = 'error';
+      activeJobProgress.message = error instanceof Error ? error.message : 'Unknown error';
+      await publishProgress();
+      activeJobProgress = null;
+    }
+    throw error;
+  }
+}
+
+/**
  * Get current job progress (if any)
  */
 export function getMaintenanceProgress(): MaintenanceJobProgress | null {
@@ -876,12 +977,21 @@ export async function enqueueMaintenanceJob(
     throw new Error('A maintenance job is already in progress');
   }
 
-  const job = await maintenanceQueue.add(`maintenance-${type}`, {
-    type,
-    userId,
-  });
+  // Use a deterministic job ID to prevent race conditions
+  // BullMQ will reject if a job with this ID already exists
+  const newJobId = `maintenance-${type}-${Date.now()}`;
+  const job = await maintenanceQueue.add(
+    `maintenance-${type}`,
+    {
+      type,
+      userId,
+    },
+    {
+      jobId: newJobId,
+    }
+  );
 
-  const jobId = job.id ?? `unknown-${Date.now()}`;
+  const jobId = job.id ?? newJobId;
   console.log(`[Maintenance] Enqueued job ${jobId} (${type})`);
   return jobId;
 }

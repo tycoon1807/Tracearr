@@ -88,22 +88,35 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
 
     // If no serverId and user is owner, use prepared statements for performance
     // Otherwise, use dynamic queries with server filtering
-    let todayPlays: number;
+    let todayPlays: number; // Validated plays (>= 2 min sessions only)
+    let todaySessions: number; // Raw session count
     let watchTimeHours: number;
     let alertsLast24h: number;
     let activeUsersToday: number;
 
     if (!serverId && authUser.role === 'owner') {
-      // Owner with no filter - use prepared statements (fastest)
-      const [todayPlaysResult, watchTimeResult, alertsResult, activeUsersResult] =
-        await Promise.all([
-          playsCountSince.execute({ since: todayStart }),
-          watchTimeSince.execute({ since: todayStart }),
-          violationsCountSince.execute({ since: last24h }),
-          uniqueUsersSince.execute({ since: todayStart }),
-        ]);
+      // Owner with no filter - use prepared statements + engagement query
+      const [
+        todayPlaysResult,
+        watchTimeResult,
+        alertsResult,
+        activeUsersResult,
+        validatedPlaysResult,
+      ] = await Promise.all([
+        playsCountSince.execute({ since: todayStart }),
+        watchTimeSince.execute({ since: todayStart }),
+        violationsCountSince.execute({ since: last24h }),
+        uniqueUsersSince.execute({ since: todayStart }),
+        // Validated plays from engagement aggregate (sessions >= 2 min)
+        db.execute(sql`
+            SELECT COALESCE(SUM(valid_session_count), 0)::int as count
+            FROM daily_content_engagement
+            WHERE day >= ${todayStart}
+          `),
+      ]);
 
-      todayPlays = todayPlaysResult[0]?.count ?? 0;
+      todaySessions = todayPlaysResult[0]?.count ?? 0;
+      todayPlays = (validatedPlaysResult.rows[0] as { count: number })?.count ?? 0;
       watchTimeHours =
         Math.round((Number(watchTimeResult[0]?.totalMs ?? 0) / (1000 * 60 * 60)) * 10) / 10;
       alertsLast24h = alertsResult[0]?.count ?? 0;
@@ -145,48 +158,80 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
         return sql``;
       };
 
+      // Build server filter for engagement aggregate
+      const buildEngagementServerFilter = () => {
+        if (serverId) {
+          return sql`AND server_id = ${serverId}::uuid`;
+        }
+        if (authUser.role !== 'owner') {
+          if (authUser.serverIds.length === 0) {
+            return sql`AND false`;
+          } else if (authUser.serverIds.length === 1) {
+            return sql`AND server_id = ${authUser.serverIds[0]}::uuid`;
+          } else {
+            const serverIdList = authUser.serverIds.map((id: string) => sql`${id}::uuid`);
+            return sql`AND server_id IN (${sql.join(serverIdList, sql`, `)})`;
+          }
+        }
+        return sql``;
+      };
+
       // Execute dynamic queries in parallel
-      const [todayPlaysResult, watchTimeResult, alertsResult, activeUsersResult] =
-        await Promise.all([
-          // Plays count
-          db
-            .select({
-              count: sql<number>`count(DISTINCT COALESCE(reference_id, id))::int`,
-            })
-            .from(sessions)
-            .where(and(...buildSessionConditions(todayStart))),
+      const [
+        todaySessionsResult,
+        watchTimeResult,
+        alertsResult,
+        activeUsersResult,
+        validatedPlaysResult,
+      ] = await Promise.all([
+        // Session count (raw)
+        db
+          .select({
+            count: sql<number>`count(DISTINCT COALESCE(reference_id, id))::int`,
+          })
+          .from(sessions)
+          .where(and(...buildSessionConditions(todayStart))),
 
-          // Watch time
-          db
-            .select({
-              totalMs: sql<number>`COALESCE(SUM(duration_ms), 0)::bigint`,
-            })
-            .from(sessions)
-            .where(and(...buildSessionConditions(todayStart))),
+        // Watch time
+        db
+          .select({
+            totalMs: sql<number>`COALESCE(SUM(duration_ms), 0)::bigint`,
+          })
+          .from(sessions)
+          .where(and(...buildSessionConditions(todayStart))),
 
-          // Violations count (join through serverUsers for server filtering)
-          db
-            .execute(
-              sql`
+        // Violations count (join through serverUsers for server filtering)
+        db
+          .execute(
+            sql`
             SELECT count(*)::int as count
             FROM violations v
             INNER JOIN server_users su ON su.id = v.server_user_id
             WHERE v.created_at >= ${last24h}
             ${buildViolationServerFilter()}
           `
-            )
-            .then((r) => [{ count: (r.rows[0] as { count: number })?.count ?? 0 }]),
+          )
+          .then((r) => [{ count: (r.rows[0] as { count: number })?.count ?? 0 }]),
 
-          // Unique users
-          db
-            .select({
-              count: sql<number>`count(DISTINCT server_user_id)::int`,
-            })
-            .from(sessions)
-            .where(and(...buildSessionConditions(todayStart))),
-        ]);
+        // Unique users
+        db
+          .select({
+            count: sql<number>`count(DISTINCT server_user_id)::int`,
+          })
+          .from(sessions)
+          .where(and(...buildSessionConditions(todayStart))),
 
-      todayPlays = todayPlaysResult[0]?.count ?? 0;
+        // Validated plays from engagement aggregate (sessions >= 2 min)
+        db.execute(sql`
+            SELECT COALESCE(SUM(valid_session_count), 0)::int as count
+            FROM daily_content_engagement
+            WHERE day >= ${todayStart}
+            ${buildEngagementServerFilter()}
+          `),
+      ]);
+
+      todaySessions = todaySessionsResult[0]?.count ?? 0;
+      todayPlays = (validatedPlaysResult.rows[0] as { count: number })?.count ?? 0;
       watchTimeHours =
         Math.round((Number(watchTimeResult[0]?.totalMs ?? 0) / (1000 * 60 * 60)) * 10) / 10;
       alertsLast24h = alertsResult[0]?.count ?? 0;
@@ -196,6 +241,7 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
     const stats: DashboardStats = {
       activeStreams,
       todayPlays,
+      todaySessions,
       watchTimeHours,
       alertsLast24h,
       activeUsersToday,

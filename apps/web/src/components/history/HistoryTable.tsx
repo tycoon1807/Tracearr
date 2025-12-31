@@ -16,7 +16,6 @@ import {
   Repeat2,
   Globe,
   Clock,
-  Eye,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -36,9 +35,93 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn, getCountryName } from '@/lib/utils';
 import { getAvatarUrl } from '@/components/users/utils';
-import type { SessionWithDetails, SessionState, MediaType } from '@tracearr/shared';
+import type { SessionWithDetails, SessionState, MediaType, EngagementTier } from '@tracearr/shared';
 import type { ColumnVisibility } from './HistoryFilters';
 import { format } from 'date-fns';
+
+// Engagement tier config
+const ENGAGEMENT_TIER_CONFIG: Record<
+  EngagementTier,
+  { label: string; shortLabel: string; color: string; bgClass: string }
+> = {
+  abandoned: {
+    label: 'Abandoned (<20%)',
+    shortLabel: 'Abandoned',
+    color: 'text-red-600',
+    bgClass: 'bg-red-100 dark:bg-red-900/30',
+  },
+  sampled: {
+    label: 'Sampled (20-49%)',
+    shortLabel: 'Sampled',
+    color: 'text-orange-600',
+    bgClass: 'bg-orange-100 dark:bg-orange-900/30',
+  },
+  engaged: {
+    label: 'Engaged (50-79%)',
+    shortLabel: 'Engaged',
+    color: 'text-yellow-600',
+    bgClass: 'bg-yellow-100 dark:bg-yellow-900/30',
+  },
+  completed: {
+    label: 'Completed (80-99%)',
+    shortLabel: 'Completed',
+    color: 'text-green-600',
+    bgClass: 'bg-green-100 dark:bg-green-900/30',
+  },
+  finished: {
+    label: 'Finished (100%)',
+    shortLabel: 'Finished',
+    color: 'text-teal-600',
+    bgClass: 'bg-teal-100 dark:bg-teal-900/30',
+  },
+  rewatched: {
+    label: 'Rewatched (200%+)',
+    shortLabel: 'Rewatched',
+    color: 'text-blue-600',
+    bgClass: 'bg-blue-100 dark:bg-blue-900/30',
+  },
+  unknown: {
+    label: 'Unknown',
+    shortLabel: '?',
+    color: 'text-muted-foreground',
+    bgClass: 'bg-muted',
+  },
+};
+
+// Calculate engagement tier from progress percentage
+function getEngagementTier(progress: number): EngagementTier {
+  if (progress >= 200) return 'rewatched';
+  if (progress >= 100) return 'finished';
+  if (progress >= 80) return 'completed';
+  if (progress >= 50) return 'engaged';
+  if (progress >= 20) return 'sampled';
+  if (progress > 0) return 'abandoned';
+  return 'unknown';
+}
+
+// Engagement tier badge component
+function EngagementTierBadge({ progress }: { progress: number }) {
+  const tier = getEngagementTier(progress);
+  if (tier === 'unknown') return null;
+
+  const config = ENGAGEMENT_TIER_CONFIG[tier];
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            'rounded px-1 py-0.5 text-[10px] font-medium',
+            config.color,
+            config.bgClass
+          )}
+        >
+          {config.shortLabel}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{config.label}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 // Sortable column keys that the API supports
 export type SortableColumn = 'startedAt' | 'durationMs' | 'mediaTitle';
@@ -198,14 +281,7 @@ export const HistoryTableRow = forwardRef<
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="truncate font-medium">{title.primary}</span>
-                {session.watched && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Eye className="h-3.5 w-3.5 text-green-500" />
-                    </TooltipTrigger>
-                    <TooltipContent>Watched</TooltipContent>
-                  </Tooltip>
-                )}
+                <EngagementTierBadge progress={progress} />
               </div>
               {title.secondary && (
                 <div className="text-muted-foreground truncate text-xs">{title.secondary}</div>

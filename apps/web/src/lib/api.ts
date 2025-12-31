@@ -35,6 +35,9 @@ import type {
   HistoryFilterOptions,
   HistoryQueryInput,
   VersionInfo,
+  EngagementStats,
+  ShowStatsResponse,
+  MediaType,
 } from '@tracearr/shared';
 
 // Re-export shared types needed by frontend components
@@ -725,6 +728,29 @@ class ApiClient {
         data: { hour: string; total: number; direct: number; transcode: number }[];
       }>(`/stats/concurrent?${params.toString()}`);
       return response.data;
+    },
+    engagement: async (
+      timeRange?: StatsTimeRange,
+      serverId?: string,
+      options?: { mediaType?: MediaType; limit?: number }
+    ) => {
+      const params = this.buildStatsParams(timeRange ?? { period: 'week' }, serverId);
+      if (options?.mediaType) params.set('mediaType', options.mediaType);
+      if (options?.limit) params.set('limit', String(options.limit));
+      return this.request<EngagementStats>(`/stats/engagement?${params.toString()}`);
+    },
+    shows: async (
+      timeRange?: StatsTimeRange,
+      serverId?: string,
+      options?: {
+        limit?: number;
+        orderBy?: 'totalEpisodeViews' | 'totalWatchHours' | 'bingeScore' | 'uniqueViewers';
+      }
+    ) => {
+      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+      if (options?.limit) params.set('limit', String(options.limit));
+      if (options?.orderBy) params.set('orderBy', options.orderBy);
+      return this.request<ShowStatsResponse>(`/stats/shows?${params.toString()}`);
     },
   };
 
