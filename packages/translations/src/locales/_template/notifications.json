@@ -1,0 +1,100 @@
+{
+  "toast": {
+    "success": {
+      "serverAdded": {
+        "title": "Server Added",
+        "message": "{{name}} has been connected successfully"
+      },
+      "serverRemoved": {
+        "title": "Server Removed",
+        "message": "The server has been removed successfully"
+      },
+      "serverSynced": {
+        "title": "Server Synced",
+        "message": "Server data has been synchronized"
+      },
+      "settingsUpdated": {
+        "title": "Settings Updated",
+        "message": "Your settings have been saved"
+      },
+      "tokenCopied": {
+        "title": "Token Copied",
+        "message": "Pair token copied to clipboard"
+      },
+      "violationAcknowledged": {
+        "title": "Violation Acknowledged",
+        "message": "The violation has been marked as acknowledged"
+      },
+      "violationDismissed": {
+        "title": "Violation Dismissed",
+        "message": "The violation has been dismissed"
+      },
+      "deviceRemoved": {
+        "title": "Device Removed",
+        "message": "The device has been disconnected"
+      },
+      "sessionsRevoked": {
+        "title": "Sessions Revoked",
+        "message": "All mobile sessions have been revoked"
+      },
+      "loggedIn": {
+        "title": "Success",
+        "message": "Logged in successfully"
+      },
+      "webhookTest": {
+        "title": "Test Successful",
+        "message": "Webhook is working correctly"
+      }
+    },
+    "error": {
+      "serverAddFailed": "Failed to add server",
+      "serverRemoveFailed": "Failed to remove server",
+      "serverSyncFailed": "Failed to sync server",
+      "settingsUpdateFailed": "Failed to update settings",
+      "copyFailed": "Could not copy to clipboard",
+      "acknowledgeFailed": "Failed to acknowledge violation",
+      "dismissFailed": "Failed to dismiss violation",
+      "authFailed": "Authentication failed",
+      "webhookTestFailed": "Webhook test failed"
+    },
+    "info": {
+      "streamStarted": {
+        "title": "New Stream Started",
+        "message": "{{user}} started watching {{media}}"
+      },
+      "streamStopped": {
+        "title": "Stream Stopped",
+        "message": "{{user}} stopped watching"
+      },
+      "updateAvailable": {
+        "title": "Update Available",
+        "message": "A new version is available"
+      },
+      "serverOffline": {
+        "title": "Server Offline",
+        "message": "{{name}} is not responding"
+      },
+      "serverOnline": {
+        "title": "Server Online",
+        "message": "{{name}} is back online"
+      }
+    }
+  },
+  "push": {
+    "violationDetected": "Sharing Violation Detected",
+    "streamStarted": "Stream Started",
+    "streamEnded": "Stream Ended",
+    "serverDown": "Server Connection Lost",
+    "serverUp": "Server Back Online"
+  },
+  "settings": {
+    "title": "Notification Settings",
+    "allSeverity": "All (Low, Warning, High)",
+    "warningAndHigh": "Warning & High only",
+    "highOnly": "High severity only",
+    "allTypes": "All Types",
+    "rateLimit": "Current Rate Limit Status",
+    "perMinute": "Per Minute",
+    "perHour": "Per Hour"
+  }
+}
