@@ -88,6 +88,22 @@ function formatDuration(ms: number | null): string {
   return `${seconds}s`;
 }
 
+// Get watch time - for active sessions (durationMs is null), calculate from elapsed time
+function getWatchTime(session: SessionWithDetails | ActiveSession): number | null {
+  // If we have a recorded duration, use it
+  if (session.durationMs !== null) {
+    return session.durationMs;
+  }
+
+  // For active sessions, calculate elapsed time minus paused time
+  const startTime = new Date(session.startedAt).getTime();
+  const now = Date.now();
+  const elapsedMs = now - startTime;
+  const pausedMs = session.pausedDurationMs ?? 0;
+
+  return Math.max(0, elapsedMs - pausedMs);
+}
+
 // Format bitrate
 function formatBitrate(bitrate: number | null): string {
   if (!bitrate) return '—';
@@ -338,7 +354,7 @@ export function SessionDetailSheet({ session, open, onOpenChange }: Props) {
               )}
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Watch time</span>
-                <span>{formatDuration(session.durationMs)}</span>
+                <span>{formatDuration(getWatchTime(session))}</span>
               </div>
               {session.pausedDurationMs > 0 && (
                 <div className="flex items-center justify-between">
