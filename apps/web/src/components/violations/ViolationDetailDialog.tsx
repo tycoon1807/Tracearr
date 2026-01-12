@@ -299,7 +299,7 @@ export function ViolationDetailDialog({
                                 {session.seasonNumber && session.episodeNumber && (
                                   <span className="text-muted-foreground">
                                     {' '}
-                                    • S{session.seasonNumber}E{session.episodeNumber}
+                                    • S{session.seasonNumber} E{session.episodeNumber}
                                   </span>
                                 )}
                               </p>

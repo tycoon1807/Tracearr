@@ -46,7 +46,7 @@ function formatMediaTitle(session: ActiveSession): { primary: string; secondary:
   if (mediaType === 'episode' && grandparentTitle) {
     const seasonEp =
       seasonNumber && episodeNumber
-        ? `S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`
+        ? `S${String(seasonNumber).padStart(2, '0')} E${String(episodeNumber).padStart(2, '0')}`
         : null;
     return {
       primary: grandparentTitle,

@@ -136,7 +136,7 @@ function getMediaTitle(session: SessionWithDetails | ActiveSession): {
   if (session.mediaType === 'episode' && session.grandparentTitle) {
     const epNum =
       session.seasonNumber && session.episodeNumber
-        ? `S${session.seasonNumber.toString().padStart(2, '0')}E${session.episodeNumber.toString().padStart(2, '0')}`
+        ? `S${session.seasonNumber.toString().padStart(2, '0')} E${session.episodeNumber.toString().padStart(2, '0')}`
         : '';
     return {
       primary: session.grandparentTitle,
