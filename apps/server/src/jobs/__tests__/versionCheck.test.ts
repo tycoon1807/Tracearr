@@ -16,6 +16,8 @@ import {
   getBaseVersion,
   compareVersions,
   isNewerVersion,
+  findBestUpdateForPrerelease,
+  type GitHubRelease,
 } from '../versionCheckQueue.js';
 
 describe('parseVersion', () => {
@@ -288,5 +290,90 @@ describe('isNewerVersion', () => {
       // But if compared directly, beta IS newer
       expect(isNewerVersion('v1.4.0-beta.1', 'v1.3.9')).toBe(true);
     });
+  });
+});
+
+// Helper to create mock GitHub releases
+function mockRelease(tag: string, prerelease: boolean, draft = false): GitHubRelease {
+  return {
+    tag_name: tag,
+    html_url: `https://github.com/test/releases/tag/${tag}`,
+    published_at: '2024-01-01T00:00:00Z',
+    name: tag,
+    body: null,
+    prerelease,
+    draft,
+  };
+}
+
+describe('findBestUpdateForPrerelease', () => {
+  it('should return newest stable when user is on older prerelease (issue #166)', () => {
+    // User on v1.4.1-beta.17, v1.4.3 stable is available
+    // Should show v1.4.3, not v1.4.1
+    const releases = [
+      mockRelease('v1.4.3', false),
+      mockRelease('v1.4.3-beta.2', true),
+      mockRelease('v1.4.3-beta.1', true),
+      mockRelease('v1.4.2', false),
+      mockRelease('v1.4.1', false),
+      mockRelease('v1.4.1-beta.18', true),
+      mockRelease('v1.4.1-beta.17', true),
+    ];
+
+    const result = findBestUpdateForPrerelease('v1.4.1-beta.17', releases);
+    expect(result?.tag_name).toBe('v1.4.3');
+  });
+
+  it('should return same-base stable when no newer stable exists', () => {
+    // User on v1.4.1-beta.17, latest stable is v1.4.1
+    const releases = [
+      mockRelease('v1.4.1', false),
+      mockRelease('v1.4.1-beta.18', true),
+      mockRelease('v1.4.1-beta.17', true),
+    ];
+
+    const result = findBestUpdateForPrerelease('v1.4.1-beta.17', releases);
+    expect(result?.tag_name).toBe('v1.4.1');
+  });
+
+  it('should return newer prerelease when no stable is newer', () => {
+    // User on v1.4.1-beta.17, newer beta exists but no newer stable
+    const releases = [
+      mockRelease('v1.4.0', false), // older stable
+      mockRelease('v1.4.1-beta.18', true),
+      mockRelease('v1.4.1-beta.17', true),
+    ];
+
+    const result = findBestUpdateForPrerelease('v1.4.1-beta.17', releases);
+    expect(result?.tag_name).toBe('v1.4.1-beta.18');
+  });
+
+  it('should return null when already on latest', () => {
+    const releases = [mockRelease('v1.4.1-beta.17', true), mockRelease('v1.4.0', false)];
+
+    const result = findBestUpdateForPrerelease('v1.4.1-beta.17', releases);
+    expect(result).toBeNull();
+  });
+
+  it('should skip draft releases', () => {
+    const releases = [
+      mockRelease('v1.5.0', false, true), // draft - should be skipped
+      mockRelease('v1.4.2', false),
+    ];
+
+    const result = findBestUpdateForPrerelease('v1.4.1-beta.17', releases);
+    expect(result?.tag_name).toBe('v1.4.2');
+  });
+
+  it('should handle unsorted release list', () => {
+    // Releases not in order - function should sort them
+    const releases = [
+      mockRelease('v1.4.1', false),
+      mockRelease('v1.4.3', false),
+      mockRelease('v1.4.2', false),
+    ];
+
+    const result = findBestUpdateForPrerelease('v1.4.1-beta.17', releases);
+    expect(result?.tag_name).toBe('v1.4.3');
   });
 });

@@ -183,7 +183,7 @@ export async function forceVersionCheck(): Promise<void> {
 }
 
 // GitHub release structure from API
-interface GitHubRelease {
+export interface GitHubRelease {
   tag_name: string;
   html_url: string;
   published_at: string;
@@ -226,38 +226,29 @@ async function fetchGitHubReleases(url: string): Promise<GitHubRelease[] | GitHu
 
 /**
  * Find the best update target for a prerelease user
- * Priority:
- * 1. Stable release of the same base version (beta.4 -> stable 1.3.9)
- * 2. Newer prerelease of the same line (beta.1 -> beta.2)
- * 3. Newer major/minor stable release
+ *
+ * Returns the newest stable release if available, otherwise the newest prerelease.
+ * This ensures prerelease users are notified about the latest stable version
+ * (e.g., user on 1.4.1-beta.17 sees 1.4.3, not just 1.4.1).
  */
-function findBestUpdateForPrerelease(
+export function findBestUpdateForPrerelease(
   currentVersion: string,
   releases: GitHubRelease[]
 ): GitHubRelease | null {
-  const current = parseVersion(currentVersion);
-
   // Filter out drafts and sort by version (newest first)
   const validReleases = releases
     .filter((r) => !r.draft)
     .sort((a, b) => compareVersions(b.tag_name, a.tag_name));
 
-  // First: Look for stable release of same base version
-  const stableOfSameBase = validReleases.find((r) => {
-    if (r.prerelease) return false;
-    const releaseVersion = parseVersion(r.tag_name);
-    return (
-      releaseVersion.major === current.major &&
-      releaseVersion.minor === current.minor &&
-      releaseVersion.patch === current.patch
-    );
-  });
+  // Find the newest stable release
+  const newestStable = validReleases.find((r) => !r.prerelease);
 
-  if (stableOfSameBase) {
-    return stableOfSameBase;
+  // If there's a stable release newer than current, return it
+  if (newestStable && compareVersions(newestStable.tag_name, currentVersion) > 0) {
+    return newestStable;
   }
 
-  // Second: Look for any newer release (stable or prerelease)
+  // Otherwise, find any newer release (including prereleases)
   const newerRelease = validReleases.find((r) => {
     return compareVersions(r.tag_name, currentVersion) > 0;
   });
