@@ -256,8 +256,8 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message ?? `Request failed: ${response.status}`);
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(errorBody.message ?? errorBody.error ?? `Request failed: ${response.status}`);
     }
 
     // Handle empty responses (204 No Content) or responses without JSON
