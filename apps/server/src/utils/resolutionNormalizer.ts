@@ -4,8 +4,9 @@
  * Normalizes video resolution from various sources (Plex, Jellyfin, Emby)
  * into consistent, display-friendly labels for Tracearr.
  *
- * Uses width-first logic to correctly classify widescreen/anamorphic content
- * (e.g., 1920x804 should be "1080p", not "720p").
+ * Uses "max of width-based and height-based" logic to correctly classify:
+ * - Widescreen/anamorphic content (e.g., 1920x804 should be "1080p", not "720p")
+ * - 4:3 aspect ratio content (e.g., 1440x1080 should be "1080p", not "720p")
  *
  * This utility is used by:
  * - Session mapper (for live sessions)
@@ -21,23 +22,62 @@ export interface ResolutionInput {
   height?: number;
 }
 
+// Resolution tier values for comparison (higher = better quality)
+const RESOLUTION_TIERS = {
+  '4K': 4,
+  '1080p': 3,
+  '720p': 2,
+  '480p': 1,
+  SD: 0,
+} as const;
+
+type ResolutionLabel = keyof typeof RESOLUTION_TIERS;
+
+/**
+ * Get resolution tier from width (for widescreen detection)
+ */
+function getResolutionFromWidth(width: number): ResolutionLabel {
+  if (width >= 3840) return '4K';
+  if (width >= 1920) return '1080p';
+  if (width >= 1280) return '720p';
+  if (width >= 854) return '480p';
+  return 'SD';
+}
+
+/**
+ * Get resolution tier from height (standard classification)
+ * Resolution names (720p, 1080p) are HEIGHT-based per broadcast standards
+ */
+function getResolutionFromHeight(height: number): ResolutionLabel {
+  if (height >= 2160) return '4K';
+  if (height >= 1080) return '1080p';
+  if (height >= 720) return '720p';
+  if (height >= 480) return '480p';
+  return 'SD';
+}
+
 /**
  * Normalize video resolution to a display-friendly label
  *
- * Priority:
- * 1. Explicit resolution string from API (most reliable when available)
- * 2. Width-based detection (handles widescreen/anamorphic content correctly)
- * 3. Height-based fallback (when only height is available)
+ * Resolution standards (720p, 1080p, etc.) are defined by VERTICAL pixel count.
+ * However, widescreen/scope content (2.39:1) has reduced height, so we use
+ * the MAX of width-based and height-based classification to handle all cases:
+ *
+ * - Widescreen: 1920x804 → max(1080p by width, 720p by height) = 1080p ✓
+ * - 4:3 content: 1440x1080 → max(720p by width, 1080p by height) = 1080p ✓
+ * - Standard 16:9: 1920x1080 → max(1080p by width, 1080p by height) = 1080p ✓
  *
  * @param input - Resolution data from media server
  * @returns Normalized resolution string (e.g., "4K", "1080p", "720p", "SD") or null
  *
  * @example
  * normalizeResolution({ resolution: '1080p' })           // "1080p"
- * normalizeResolution({ width: 1920, height: 804 })      // "1080p" (widescreen)
- * normalizeResolution({ width: 1920, height: 1080 })     // "1080p"
+ * normalizeResolution({ width: 1920, height: 804 })      // "1080p" (widescreen 2.39:1)
+ * normalizeResolution({ width: 1440, height: 1080 })     // "1080p" (4:3 aspect ratio)
+ * normalizeResolution({ width: 1920, height: 1080 })     // "1080p" (16:9 standard)
  * normalizeResolution({ width: 3840, height: 1600 })     // "4K" (ultrawide)
- * normalizeResolution({ height: 804 })                   // "720p" (height-only fallback)
+ * normalizeResolution({ height: 1080 })                  // "1080p" (height-only)
+ * normalizeResolution({ width: 1920 })                   // "1080p" (width-only)
  */
 export function normalizeResolution(input: ResolutionInput): string | null {
   const { resolution, width, height } = input;
@@ -74,27 +114,26 @@ export function normalizeResolution(input: ResolutionInput): string | null {
     return resolution;
   }
 
-  // 2. Width-based detection (handles widescreen correctly)
-  // Width is more reliable than height for widescreen content:
-  // - 1920x804 (2.39:1 scope) -> 1080p based on width
-  // - 1920x800 (2.40:1) -> 1080p based on width
-  // - 3840x1600 (2.40:1 ultrawide) -> 4K based on width
-  if (width) {
-    if (width >= 3840) return '4K';
-    if (width >= 1920) return '1080p';
-    if (width >= 1280) return '720p';
-    if (width >= 854) return '480p';
-    return 'SD';
+  // 2. Use MAX of width-based and height-based classification
+  // This handles both widescreen (scope) and 4:3 content correctly:
+  // - Widescreen 1920x804: max(1080p, 720p) = 1080p (width indicates source)
+  // - 4:3 content 1440x1080: max(720p, 1080p) = 1080p (height is the standard)
+  if (width && height) {
+    const widthRes = getResolutionFromWidth(width);
+    const heightRes = getResolutionFromHeight(height);
+
+    // Return the higher quality tier
+    return RESOLUTION_TIERS[widthRes] >= RESOLUTION_TIERS[heightRes] ? widthRes : heightRes;
   }
 
-  // 3. Height-based fallback (when only height is available)
-  // Less accurate for widescreen but better than nothing
+  // 3. Width-only (e.g., widescreen without height info)
+  if (width) {
+    return getResolutionFromWidth(width);
+  }
+
+  // 4. Height-only (standard classification by vertical pixels)
   if (height) {
-    if (height >= 2160) return '4K';
-    if (height >= 1080) return '1080p';
-    if (height >= 720) return '720p';
-    if (height >= 480) return '480p';
-    return 'SD';
+    return getResolutionFromHeight(height);
   }
 
   return null;

@@ -2,7 +2,9 @@
  * Resolution Normalizer Tests
  *
  * Tests the shared resolution normalization utility used across all importers and pollers.
- * Specifically tests handling of widescreen/anamorphic content (Issue #75).
+ * Specifically tests handling of:
+ * - Widescreen/anamorphic content (Issue #75)
+ * - 4:3 aspect ratio content (Issue #183)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -136,6 +138,65 @@ describe('normalizeResolution', () => {
     });
   });
 
+  describe('4:3 aspect ratio content (Issue #183)', () => {
+    it('should return 1080p for 1440x1080 (4:3 at 1080 height)', () => {
+      // This is the main bug reported in Issue #183
+      // 1440x1080 is 4:3 content at 1080p - should NOT be classified as 720p
+      expect(normalizeResolution({ width: 1440, height: 1080 })).toBe('1080p');
+    });
+
+    it('should return 720p for 960x720 (4:3 at 720 height)', () => {
+      expect(normalizeResolution({ width: 960, height: 720 })).toBe('720p');
+    });
+
+    it('should return 4K for 2880x2160 (4:3 at 4K height)', () => {
+      expect(normalizeResolution({ width: 2880, height: 2160 })).toBe('4K');
+    });
+
+    it('should return 480p for 640x480 (4:3 at 480 height)', () => {
+      expect(normalizeResolution({ width: 640, height: 480 })).toBe('480p');
+    });
+
+    it('should return 480p for 720x480 (anamorphic SD)', () => {
+      expect(normalizeResolution({ width: 720, height: 480 })).toBe('480p');
+    });
+
+    it('should return 480p for 720x576 (PAL anamorphic)', () => {
+      // PAL resolution - height 576 is >= 480, should be 480p
+      expect(normalizeResolution({ width: 720, height: 576 })).toBe('480p');
+    });
+  });
+
+  describe('HDV/AVCHD anamorphic formats', () => {
+    it('should return 1080p for 1440x1080 HDV format', () => {
+      // HDV uses 1440x1080 with 1.333 PAR to produce 16:9 display
+      // But for classification, height of 1080 = 1080p
+      expect(normalizeResolution({ width: 1440, height: 1080 })).toBe('1080p');
+    });
+
+    it('should return 720p for 960x720 DVCPRO-HD format', () => {
+      // DVCPRO-HD uses 960x720 with 1.333 PAR
+      expect(normalizeResolution({ width: 960, height: 720 })).toBe('720p');
+    });
+  });
+
+  describe('max of width/height classification', () => {
+    it('should use height when it indicates higher resolution than width', () => {
+      // 4:3 content: width suggests 720p, height suggests 1080p -> 1080p wins
+      expect(normalizeResolution({ width: 1440, height: 1080 })).toBe('1080p');
+    });
+
+    it('should use width when it indicates higher resolution than height', () => {
+      // Widescreen: width suggests 1080p, height suggests 720p -> 1080p wins
+      expect(normalizeResolution({ width: 1920, height: 804 })).toBe('1080p');
+    });
+
+    it('should handle equal tiers correctly', () => {
+      // Standard 16:9: both suggest 1080p
+      expect(normalizeResolution({ width: 1920, height: 1080 })).toBe('1080p');
+    });
+  });
+
   describe('height-based fallback', () => {
     it('should return 4K for height >= 2160 (when no width)', () => {
       expect(normalizeResolution({ height: 2160 })).toBe('4K');
@@ -190,6 +251,10 @@ describe('formatQualityString', () => {
 
   it('should handle widescreen content correctly', () => {
     expect(formatQualityString({ videoWidth: 1920, videoHeight: 804 })).toBe('1080p');
+  });
+
+  it('should handle 4:3 content correctly (Issue #183)', () => {
+    expect(formatQualityString({ videoWidth: 1440, videoHeight: 1080 })).toBe('1080p');
   });
 
   it('should fall back to bitrate when no resolution', () => {
