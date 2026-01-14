@@ -55,13 +55,14 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
       conditions.push(sql`s.started_at < ${dateRange.end}`);
     }
 
-    // Apply server access restriction if user has limited access
-    // Note: We build the array literal explicitly because Drizzle doesn't auto-convert JS arrays for ANY()
-    if (authUser.serverIds.length > 0) {
-      const serverIdArray = sql.raw(
-        `ARRAY[${authUser.serverIds.map((id: string) => `'${id}'::uuid`).join(',')}]`
-      );
-      conditions.push(sql`s.server_id = ANY(${serverIdArray})`);
+    // Apply server access restriction
+    if (authUser.role !== 'owner' && authUser.serverIds.length > 0) {
+      if (authUser.serverIds.length === 1) {
+        conditions.push(sql`s.server_id = ${authUser.serverIds[0]}`);
+      } else {
+        const serverIdList = authUser.serverIds.map((id: string) => sql`${id}`);
+        conditions.push(sql`s.server_id IN (${sql.join(serverIdList, sql`, `)})`);
+      }
     }
 
     if (serverUserId) {
@@ -94,11 +95,14 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
     if (period === 'custom') {
       baseConditions.push(sql`s.started_at < ${dateRange.end}`);
     }
-    if (authUser.serverIds.length > 0) {
-      const baseServerIdArray = sql.raw(
-        `ARRAY[${authUser.serverIds.map((id: string) => `'${id}'::uuid`).join(',')}]`
-      );
-      baseConditions.push(sql`s.server_id = ANY(${baseServerIdArray})`);
+    // Apply server access restriction for cascading filters (owners see all servers)
+    if (authUser.role !== 'owner' && authUser.serverIds.length > 0) {
+      if (authUser.serverIds.length === 1) {
+        baseConditions.push(sql`s.server_id = ${authUser.serverIds[0]}`);
+      } else {
+        const serverIdList = authUser.serverIds.map((id: string) => sql`${id}`);
+        baseConditions.push(sql`s.server_id IN (${sql.join(serverIdList, sql`, `)})`);
+      }
     }
 
     // Users filter: apply server + mediaType filters (not user filter)

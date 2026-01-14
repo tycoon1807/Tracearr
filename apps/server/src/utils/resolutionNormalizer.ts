@@ -102,7 +102,6 @@ export function normalizeResolution(input: ResolutionInput): string | null {
 
 /**
  * Build quality display string from session quality data
- * Prefers resolution over bitrate for clarity
  *
  * @param quality - Session quality object
  * @returns Quality string for display (e.g., "4K", "1080p", "54 Mbps", "Direct")
@@ -113,12 +112,20 @@ export function formatQualityString(quality: {
   videoHeight?: number;
   bitrate?: number;
   isTranscode?: boolean;
+  streamVideoDetails?: { width?: number; height?: number };
 }): string {
+  const effectiveWidth = quality.isTranscode
+    ? (quality.streamVideoDetails?.width ?? quality.videoWidth)
+    : quality.videoWidth;
+  const effectiveHeight = quality.isTranscode
+    ? (quality.streamVideoDetails?.height ?? quality.videoHeight)
+    : quality.videoHeight;
+
   // Prefer resolution-based display
   const resolution = normalizeResolution({
     resolution: quality.videoResolution,
-    width: quality.videoWidth,
-    height: quality.videoHeight,
+    width: effectiveWidth,
+    height: effectiveHeight,
   });
 
   if (resolution) {

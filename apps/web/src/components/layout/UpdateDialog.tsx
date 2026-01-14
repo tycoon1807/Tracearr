@@ -45,10 +45,20 @@ export function UpdateDialog({ open, onOpenChange, version }: UpdateDialogProps)
   // Format the docker pull command
   const dockerCommand = useMemo(() => {
     if (!latest) return '';
-    // Use 'next' tag for prereleases, 'latest' for stable
-    const tag = latest.isPrerelease ? 'next' : 'latest';
+
+    // Check if user is running supervised image (tag starts with "supervised-")
+    const isSupervised = current.tag?.startsWith('supervised-') ?? false;
+
+    // Determine the appropriate tag based on image type and release channel
+    let tag: string;
+    if (isSupervised) {
+      tag = latest.isPrerelease ? 'supervised-next' : 'supervised';
+    } else {
+      tag = latest.isPrerelease ? 'next' : 'latest';
+    }
+
     return `docker pull ghcr.io/connorgallopo/tracearr:${tag}`;
-  }, [latest]);
+  }, [current.tag, latest]);
 
   if (!latest || !updateType) return null;
 
