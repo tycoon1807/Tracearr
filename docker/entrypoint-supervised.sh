@@ -171,10 +171,33 @@ else
     log "PostgreSQL data directory exists, skipping initialization"
 fi
 
-# Ensure data directories exist and have correct ownership
+# Ensure data directories exist and have correct ownership and permissions
 # This handles fresh installs, upgrades, and bind mounts to new paths
 mkdir -p /data/postgres /data/redis /data/tracearr
 chown -R postgres:postgres /data/postgres
+# PostgreSQL requires data directory to be 0700 or 0750 - some filesystems
+# (especially Unraid's FUSE-based mounts) may not preserve these permissions
+chmod 700 /data/postgres
+
+# =============================================================================
+# Clean up stale PostgreSQL lock files from unclean shutdowns
+# =============================================================================
+# If the container crashed or was killed during operation, postmaster.pid may
+# be left behind, preventing PostgreSQL from starting. This is safe in containers
+# due to PID namespace isolation - old PIDs from previous container runs cannot
+# match real processes in the new container.
+if [ -f /data/postgres/postmaster.pid ]; then
+    PG_PID=$(head -1 /data/postgres/postmaster.pid 2>/dev/null || echo "")
+    if [ -z "$PG_PID" ]; then
+        # Empty or corrupted pid file - safe to remove
+        warn "Removing empty/corrupted postmaster.pid file"
+        rm -f /data/postgres/postmaster.pid
+    elif ! kill -0 "$PG_PID" 2>/dev/null; then
+        # PID doesn't exist - stale from previous container run
+        warn "Removing stale postmaster.pid (PID $PG_PID not running)"
+        rm -f /data/postgres/postmaster.pid
+    fi
+fi
 chown -R redis:redis /data/redis
 chown -R tracearr:tracearr /data/tracearr
 chown -R tracearr:tracearr /app
@@ -230,6 +253,47 @@ if command -v timescaledb-tune &> /dev/null; then
             --conf-path=/data/postgres/postgresql.conf \
             --yes --quiet 2>/dev/null || warn "timescaledb-tune failed (non-fatal)"
     fi
+fi
+
+# =============================================================================
+# Configure database connection pool to match PostgreSQL max_connections
+# =============================================================================
+# After timescaledb-tune runs, read the configured max_connections and set
+# DATABASE_POOL_MAX accordingly. This prevents pool exhaustion on high-memory
+# systems while avoiding connection conflicts on low-memory systems.
+if [ -z "${DATABASE_POOL_MAX:-}" ]; then
+    PG_MAX_CONN=""
+
+    # Try to read max_connections from postgresql.conf
+    if [ -f /data/postgres/postgresql.conf ]; then
+        PG_MAX_CONN=$(grep -E "^max_connections\s*=" /data/postgres/postgresql.conf 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo "")
+    fi
+
+    # Fallback: use a safe default if we couldn't read the config
+    if [ -z "$PG_MAX_CONN" ] || [ "$PG_MAX_CONN" -eq 0 ] 2>/dev/null; then
+        PG_MAX_CONN=100
+        warn "Could not read max_connections from postgresql.conf, assuming $PG_MAX_CONN"
+    fi
+
+    # Reserve connections for superuser, maintenance, and replication
+    # - 3 for superuser reserved connections
+    # - 2 for maintenance/backup operations
+    RESERVED_CONN=5
+    POOL_MAX=$((PG_MAX_CONN - RESERVED_CONN))
+
+    # Enforce minimum and maximum bounds
+    if [ "$POOL_MAX" -lt 10 ]; then
+        POOL_MAX=10
+        warn "Calculated pool max too low, using minimum of $POOL_MAX"
+    elif [ "$POOL_MAX" -gt 100 ]; then
+        # Cap at 100 - more than enough for a single-user self-hosted app
+        POOL_MAX=100
+    fi
+
+    export DATABASE_POOL_MAX="$POOL_MAX"
+    log "Database pool configured: max=$POOL_MAX (PostgreSQL max_connections=$PG_MAX_CONN)"
+else
+    log "Using user-specified DATABASE_POOL_MAX=$DATABASE_POOL_MAX"
 fi
 
 # =============================================================================
