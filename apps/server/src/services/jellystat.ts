@@ -59,6 +59,11 @@ interface MediaEnrichment {
   episodeNumber?: number;
   year?: number;
   thumbPath?: string;
+  // Music track metadata
+  artistName?: string;
+  albumName?: string;
+  trackNumber?: number;
+  discNumber?: number;
 }
 
 /**
@@ -272,6 +277,12 @@ interface MediaServerClientWithItems {
       // Episode series info for poster lookup
       SeriesId?: string;
       SeriesPrimaryImageTag?: string;
+      // Music track metadata
+      Album?: string;
+      AlbumArtist?: string;
+      Artists?: string[];
+      AlbumId?: string;
+      AlbumPrimaryImageTag?: string;
     }[]
   >;
 }
@@ -325,7 +336,18 @@ export function transformActivityToSession(
       ? Math.floor(activity.PlayState.RuntimeTicks / TICKS_TO_MS)
       : null;
 
-  const mediaType: 'movie' | 'episode' | 'track' = activity.SeriesName ? 'episode' : 'movie';
+  // Detect media type from SeriesName and MediaStreams
+  // Music tracks have no video stream but have audio stream
+  const activityForStreams = activity as Record<string, unknown>;
+  const streams = activityForStreams.MediaStreams as JellystatMediaStream[] | null;
+  const hasVideoStream = streams?.some((s) => s.Type === 'Video') ?? true; // default true if no streams
+  const hasAudioStream = streams?.some((s) => s.Type === 'Audio') ?? false;
+
+  const mediaType: 'movie' | 'episode' | 'track' = activity.SeriesName
+    ? 'episode'
+    : !hasVideoStream && hasAudioStream
+      ? 'track'
+      : 'movie';
 
   // Extract TranscodingInfo for DirectStream vs DirectPlay detection
   // Jellystat exports "DirectStream" for what Emby shows as "DirectPlay"
@@ -374,6 +396,11 @@ export function transformActivityToSession(
     episodeNumber: enrichment?.episodeNumber ?? null,
     year: enrichment?.year ?? null,
     thumbPath: enrichment?.thumbPath ?? null,
+    // Music track metadata (only applied for track type)
+    artistName: mediaType === 'track' ? (enrichment?.artistName ?? null) : null,
+    albumName: mediaType === 'track' ? (enrichment?.albumName ?? null) : null,
+    trackNumber: mediaType === 'track' ? (enrichment?.trackNumber ?? null) : null,
+    discNumber: mediaType === 'track' ? (enrichment?.discNumber ?? null) : null,
     startedAt,
     lastSeenAt: stoppedAt,
     lastPausedAt: null,
@@ -453,8 +480,29 @@ async function fetchMediaEnrichment(
       // Fall back to episode's own image if series info is missing
       if (item.SeriesId && item.SeriesPrimaryImageTag) {
         enrichment.thumbPath = `/Items/${item.SeriesId}/Images/Primary`;
+      } else if (item.AlbumId && item.AlbumPrimaryImageTag) {
+        // For music tracks, use album art
+        enrichment.thumbPath = `/Items/${item.AlbumId}/Images/Primary`;
       } else if (item.ImageTags?.Primary) {
         enrichment.thumbPath = `/Items/${item.Id}/Images/Primary`;
+      }
+
+      // Music track metadata
+      // Prefer AlbumArtist, fall back to first artist in Artists array
+      const artistName = item.AlbumArtist || item.Artists?.[0];
+      if (artistName) {
+        enrichment.artistName = artistName.slice(0, 255);
+      }
+      if (item.Album) {
+        enrichment.albumName = item.Album.slice(0, 255);
+      }
+      // For music: IndexNumber is track number, ParentIndexNumber is disc number
+      // These overlap with episode fields but are applied based on mediaType later
+      if (item.IndexNumber != null) {
+        enrichment.trackNumber = item.IndexNumber;
+      }
+      if (item.ParentIndexNumber != null) {
+        enrichment.discNumber = item.ParentIndexNumber;
       }
 
       if (Object.keys(enrichment).length > 0) {
