@@ -193,10 +193,11 @@ function formatDuration(ms: number | null): string {
   return `${seconds}s`;
 }
 
-// Calculate progress percentage
+// Calculate progress percentage (playback position)
+// Uses progressMs (where in the video) not durationMs (how long watched)
 function getProgress(session: SessionWithDetails): number {
   if (!session.totalDurationMs || session.totalDurationMs === 0) return 0;
-  const progress = session.progressMs ?? session.durationMs ?? 0;
+  const progress = session.progressMs ?? 0;
   return Math.min(100, Math.round((progress / session.totalDurationMs) * 100));
 }
 
