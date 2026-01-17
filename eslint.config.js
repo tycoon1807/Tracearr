@@ -88,6 +88,12 @@ export default tseslint.config(
       'react/prop-types': 'off',
       'react/no-unescaped-entities': 'off',
       'react-hooks/set-state-in-effect': 'off',
+      // Disable React Compiler rules (new in v7) until codebase is ready
+      'react-hooks/react-compiler': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/static-components': 'off',
+      'react-hooks/purity': 'off',
     },
   },
   {
