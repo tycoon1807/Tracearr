@@ -48,17 +48,17 @@
   },
   "dependencies": {
     "@tracearr/shared": "workspace:*",
-    "drizzle-orm": "^0.44.0",
-    "ioredis": "^5.4.2",
+    "drizzle-orm": "^0.45.1",
+    "ioredis": "^5.9.2",
     "ioredis-mock": "^8.9.0",
     "jsonwebtoken": "^9.0.3",
-    "pg": "^8.13.0"
+    "pg": "^8.17.1"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.7",
-    "@types/pg": "^8.11.10",
-    "typescript": "^5.7.0",
-    "vitest": "^4.0.0"
+    "@types/pg": "^8.16.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.17"
   },
   "peerDependencies": {
     "vitest": "^4.0.0"
