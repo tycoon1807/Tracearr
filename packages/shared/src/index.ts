@@ -75,6 +75,8 @@ export type {
   // Jellystat import
   JellystatImportProgress,
   JellystatImportResult,
+  // Library sync
+  LibrarySyncProgress,
   // Maintenance jobs
   MaintenanceJobType,
   MaintenanceJobStatus,
@@ -158,6 +160,55 @@ export type {
   BandwidthTopUser,
   BandwidthTopUsersResponse,
   BandwidthSummary,
+  // Library statistics
+  LibraryStatsResponse,
+  GrowthDataPoint,
+  LibraryGrowthResponse,
+  QualityDataPoint,
+  LibraryQualityResponse,
+  StorageHistoryPoint,
+  StoragePrediction,
+  LibraryStorageResponse,
+  MatchType,
+  DuplicateItem,
+  DuplicateGroup,
+  DuplicatesSummary,
+  DuplicatesResponse,
+  StaleCategory,
+  StaleItem,
+  StaleSummary,
+  StaleResponse,
+  WatchItem,
+  WatchSummary,
+  WatchResponse,
+  CompletionStatus,
+  CompletionItem,
+  SeasonCompletion,
+  SeriesCompletion,
+  CompletionSummary,
+  CompletionPaginationInfo,
+  CompletionResponse,
+  BingeShow,
+  HourlyDistribution,
+  MonthlyTrend,
+  PatternsResponse,
+  ValueCategory,
+  RoiItem,
+  RoiSummary,
+  ValueThresholds,
+  RoiResponse,
+  TopMovie,
+  TopMoviesSummary,
+  TopMoviesResponse,
+  TopShow,
+  TopShowsSummary,
+  TopShowsResponse,
+  CodecEntry,
+  CodecBreakdown,
+  LibraryCodecsResponse,
+  ResolutionEntry,
+  ResolutionBreakdown,
+  LibraryResolutionResponse,
 } from './types.js';
 
 // Schema exports
@@ -219,6 +270,18 @@ export {
   userBehaviorTypeSchema,
   engagementQuerySchema,
   showsQuerySchema,
+  // Library stats
+  libraryStatsQuerySchema,
+  libraryGrowthQuerySchema,
+  libraryQualityQuerySchema,
+  libraryStorageQuerySchema,
+  libraryDuplicatesQuerySchema,
+  libraryStaleQuerySchema,
+  libraryWatchQuerySchema,
+  libraryRoiQuerySchema,
+  libraryPatternsQuerySchema,
+  libraryCompletionQuerySchema,
+  topContentQuerySchema,
 } from './schemas.js';
 
 // Schema input type exports
@@ -252,6 +315,18 @@ export type {
   // Engagement tracking
   EngagementQueryInput,
   ShowsQueryInput,
+  // Library stats
+  LibraryStatsQueryInput,
+  LibraryGrowthQueryInput,
+  LibraryQualityQueryInput,
+  LibraryStorageQueryInput,
+  LibraryDuplicatesQueryInput,
+  LibraryStaleQueryInput,
+  LibraryWatchQueryInput,
+  LibraryRoiQueryInput,
+  LibraryPatternsQueryInput,
+  LibraryCompletionQueryInput,
+  TopContentQueryInput,
 } from './schemas.js';
 
 // Constant exports

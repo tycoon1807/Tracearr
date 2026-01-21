@@ -347,6 +347,7 @@ export const sessions = pgTable(
     index('sessions_device_idx').on(table.serverUserId, table.deviceId),
     index('sessions_reference_idx').on(table.referenceId), // For session grouping queries
     index('sessions_server_user_rating_idx').on(table.serverUserId, table.ratingKey), // For resume detection
+    index('sessions_server_rating_idx').on(table.serverId, table.ratingKey), // For library item joins (watch/stale/roi)
     // Index for Tautulli import deduplication fallback (when externalSessionId not found)
     index('sessions_dedup_fallback_idx').on(
       table.serverId,
@@ -667,6 +668,8 @@ export const settings = pgTable('settings', {
 export const serversRelations = relations(servers, ({ one, many }) => ({
   serverUsers: many(serverUsers),
   sessions: many(sessions),
+  libraryItems: many(libraryItems),
+  librarySnapshots: many(librarySnapshots),
   plexAccount: one(plexAccounts, {
     fields: [servers.plexAccountId],
     references: [plexAccounts.id],
@@ -786,5 +789,174 @@ export const terminationLogsRelations = relations(terminationLogs, ({ one }) => 
   violation: one(violations, {
     fields: [terminationLogs.violationId],
     references: [violations.id],
+  }),
+}));
+
+// ============================================================================
+// Library Statistics Tables
+// ============================================================================
+
+/**
+ * Library Items - Catalog of media items across all servers
+ *
+ * Stores media metadata with native columns for external IDs (IMDB, TMDB, TVDB)
+ * for fast cross-server duplicate detection. B-tree indexes on external IDs
+ * provide sub-millisecond lookups (100-1000x faster than JSONB with GIN indexes).
+ *
+ * Note: This table stores the current state of library items. Historical
+ * snapshots are tracked in library_snapshots (TimescaleDB hypertable).
+ */
+export const libraryItems = pgTable(
+  'library_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    // Server relationship
+    serverId: uuid('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+
+    // Server-specific identifiers
+    libraryId: varchar('library_id', { length: 100 }).notNull(), // Server's library identifier
+    ratingKey: varchar('rating_key', { length: 255 }).notNull(), // Server-specific media ID
+
+    // External IDs (native columns for B-tree index performance)
+    // 100-1000x faster lookups than JSONB with GIN indexes
+    imdbId: varchar('imdb_id', { length: 20 }), // IMDB ID (tt1234567 format)
+    tmdbId: integer('tmdb_id'), // TMDB ID
+    tvdbId: integer('tvdb_id'), // TVDB ID
+
+    // Media metadata
+    title: varchar('title', { length: 500 }).notNull(),
+    mediaType: varchar('media_type', { length: 20 }).notNull(), // movie, episode, season, show, artist, album, track
+    year: integer('year'),
+
+    // Quality tracking
+    videoResolution: varchar('video_resolution', { length: 20 }), // '4k', '1080p', '720p', 'sd'
+    videoCodec: varchar('video_codec', { length: 50 }), // 'hevc', 'h264', 'av1'
+    audioCodec: varchar('audio_codec', { length: 50 }),
+    audioChannels: integer('audio_channels'), // 2 (stereo), 6 (5.1), 8 (7.1)
+    fileSize: bigint('file_size', { mode: 'number' }), // Bytes
+
+    // Debug only - never used for matching (file paths differ across servers)
+    filePath: text('file_path'),
+
+    // Hierarchy fields for episodes and tracks (Plex-style naming)
+    // For episodes: grandparent=show, parent=season, item_index=episode#, parent_index=season#
+    // For tracks: grandparent=artist, parent=album, item_index=track#
+    grandparentTitle: varchar('grandparent_title', { length: 500 }),
+    grandparentRatingKey: varchar('grandparent_rating_key', { length: 255 }),
+    parentTitle: varchar('parent_title', { length: 500 }),
+    parentRatingKey: varchar('parent_rating_key', { length: 255 }),
+    parentIndex: integer('parent_index'), // season number for episodes
+    itemIndex: integer('item_index'), // episode number or track number
+
+    // Timestamps
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Partial B-tree indexes on external IDs (exclude NULLs - saves 20-40% index size)
+    index('idx_library_items_imdb_partial')
+      .on(table.imdbId)
+      .where(sql`${table.imdbId} IS NOT NULL`),
+    index('idx_library_items_tmdb_partial')
+      .on(table.tmdbId)
+      .where(sql`${table.tmdbId} IS NOT NULL`),
+    index('idx_library_items_tvdb_partial')
+      .on(table.tvdbId)
+      .where(sql`${table.tvdbId} IS NOT NULL`),
+
+    // Composite index for library-scoped queries
+    index('idx_library_items_server_library').on(table.serverId, table.libraryId),
+
+    // Unique constraint to prevent duplicates (one rating_key per server)
+    uniqueIndex('library_items_server_rating_key_unique').on(table.serverId, table.ratingKey),
+
+    // Composite index for media type filtering (used by nearly all library routes)
+    index('idx_library_items_server_media_type').on(table.serverId, table.mediaType),
+
+    // Composite index for growth queries (created_at range filtering with server context)
+    index('idx_library_items_server_created').on(table.serverId, table.createdAt),
+
+    // GIN trigram index for fuzzy duplicate detection (requires pg_trgm extension)
+    index('idx_library_items_title_trgm').using('gin', sql`${table.title} gin_trgm_ops`),
+  ]
+);
+
+/**
+ * Library Snapshots - Time-series table for tracking library state over time
+ *
+ * This table is converted to a TimescaleDB hypertable with 1-day chunks.
+ * Stores aggregate statistics per library per snapshot time.
+ *
+ * CRITICAL: Dimensions limited to server_id, library_id, snapshot_time to prevent
+ * cardinality explosion. No unbounded fields (title, file_path) as columns.
+ *
+ * Compression: Activates after 3 days (allows enrichment to complete)
+ * Retention: 1 year (automatic chunk dropping)
+ */
+export const librarySnapshots = pgTable(
+  'library_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // DIMENSION: Low cardinality (~1-10 servers)
+    serverId: uuid('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    // DIMENSION: Low cardinality (~10-50 libraries per server)
+    libraryId: varchar('library_id', { length: 100 }).notNull(),
+    // TIME DIMENSION: Primary partitioning key for hypertable
+    snapshotTime: timestamp('snapshot_time', { withTimezone: true }).notNull(),
+
+    // Aggregate counts - total items in library at snapshot time
+    itemCount: integer('item_count').notNull(),
+    totalSize: bigint('total_size', { mode: 'number' }).notNull(), // Bytes
+
+    // Media type breakdown
+    movieCount: integer('movie_count').notNull().default(0),
+    episodeCount: integer('episode_count').notNull().default(0),
+    seasonCount: integer('season_count').notNull().default(0),
+    showCount: integer('show_count').notNull().default(0),
+    musicCount: integer('music_count').notNull().default(0),
+
+    // Resolution breakdown
+    count4k: integer('count_4k').notNull().default(0),
+    count1080p: integer('count_1080p').notNull().default(0),
+    count720p: integer('count_720p').notNull().default(0),
+    countSd: integer('count_sd').notNull().default(0),
+
+    // Codec breakdown
+    hevcCount: integer('hevc_count').notNull().default(0),
+    h264Count: integer('h264_count').notNull().default(0),
+    av1Count: integer('av1_count').notNull().default(0),
+
+    // Enrichment status tracking
+    enrichmentPending: integer('enrichment_pending').notNull().default(0),
+    enrichmentComplete: integer('enrichment_complete').notNull().default(0),
+  },
+  (table) => [
+    // Composite index for time-series queries by server and library
+    index('library_snapshots_server_library_time_idx').on(
+      table.serverId,
+      table.libraryId,
+      table.snapshotTime
+    ),
+    // Index on snapshot_time for retention policy efficiency
+    index('library_snapshots_time_idx').on(table.snapshotTime),
+  ]
+);
+
+export const librarySnapshotsRelations = relations(librarySnapshots, ({ one }) => ({
+  server: one(servers, {
+    fields: [librarySnapshots.serverId],
+    references: [servers.id],
+  }),
+}));
+
+export const libraryItemsRelations = relations(libraryItems, ({ one }) => ({
+  server: one(servers, {
+    fields: [libraryItems.serverId],
+    references: [servers.id],
   }),
 }));

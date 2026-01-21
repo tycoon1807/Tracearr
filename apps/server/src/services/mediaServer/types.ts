@@ -229,6 +229,94 @@ export interface MediaLibrary {
 }
 
 // ============================================================================
+// Library Item Types
+// ============================================================================
+
+/**
+ * Unified library item representation across media servers
+ *
+ * Used for library scanning and snapshot generation. Contains both
+ * metadata and quality information needed for library statistics.
+ */
+export interface MediaLibraryItem {
+  // === Core Identification ===
+
+  /** Server-specific ID (Plex ratingKey, Jellyfin/Emby Id) */
+  ratingKey: string;
+
+  /** Item title */
+  title: string;
+
+  /** Content type */
+  mediaType: 'movie' | 'show' | 'season' | 'episode' | 'artist' | 'album' | 'track';
+
+  /** Release year (optional) */
+  year?: number;
+
+  /** When item was added to library */
+  addedAt: Date;
+
+  // === Quality Fields (all optional) ===
+
+  /** Video resolution string ('4k', '1080p', '720p', 'sd') */
+  videoResolution?: string;
+
+  /** Video codec (HEVC, H264, VP9, AV1, etc.) */
+  videoCodec?: string;
+
+  /** Audio codec (TrueHD, DTS-HD MA, AAC, FLAC, etc.) */
+  audioCodec?: string;
+
+  /** Audio channel count (2, 6, 8) */
+  audioChannels?: number;
+
+  /** File size in bytes */
+  fileSize?: number;
+
+  /** Container format (mkv, mp4, avi, etc.) */
+  container?: string;
+
+  // === External ID Fields (filled by Phase 3 enrichment or from server data) ===
+
+  /** IMDB ID (e.g., "tt1234567") */
+  imdbId?: string;
+
+  /** TMDB numeric ID */
+  tmdbId?: number;
+
+  /** TVDB numeric ID */
+  tvdbId?: number;
+
+  // === Hierarchy Fields (for episodes and tracks) ===
+  // Uses Plex-style naming: grandparent (show/artist), parent (season/album)
+  // For episodes: grandparent=show, parent=season
+  // For tracks: grandparent=artist, parent=album
+
+  /** Grandparent title (show name for episodes, artist name for tracks) */
+  grandparentTitle?: string;
+
+  /** Grandparent rating key (show ID for episodes, artist ID for tracks) */
+  grandparentRatingKey?: string;
+
+  /** Parent title (season name for episodes, album name for tracks) */
+  parentTitle?: string;
+
+  /** Parent rating key (season ID for episodes, album ID for tracks) */
+  parentRatingKey?: string;
+
+  /** Parent index (season number for episodes, unused for tracks) */
+  parentIndex?: number;
+
+  /** Item index (episode number for episodes, track number for tracks) */
+  itemIndex?: number;
+
+  // === Debug Field ===
+
+  /** File path (debug only - NEVER use for matching across servers) */
+  filePath?: string;
+}
+
+// ============================================================================
 // Watch History Types
 // ============================================================================
 
@@ -319,6 +407,42 @@ export interface IMediaServerClient {
    * @throws Error if termination fails
    */
   terminateSession(sessionId: string, reason?: string): Promise<boolean>;
+
+  /**
+   * Get all items in a library with pagination support
+   *
+   * Used for library scanning and snapshot generation. Returns items
+   * with quality metadata and external IDs when available.
+   *
+   * @param libraryId - The library identifier
+   * @param options - Pagination options
+   * @returns Promise with items array and total count for pagination
+   */
+  getLibraryItems(
+    libraryId: string,
+    options?: {
+      offset?: number;
+      limit?: number;
+    }
+  ): Promise<{ items: MediaLibraryItem[]; totalCount: number }>;
+
+  /**
+   * Get all leaf items (episodes) from a library with pagination support
+   *
+   * For TV show libraries, returns all episodes across all shows.
+   * Optional - only implemented by servers that support hierarchical libraries.
+   *
+   * @param libraryId - The library identifier
+   * @param options - Pagination options
+   * @returns Promise with episode items and total count, or undefined if not supported
+   */
+  getLibraryLeaves?(
+    libraryId: string,
+    options?: {
+      offset?: number;
+      limit?: number;
+    }
+  ): Promise<{ items: MediaLibraryItem[]; totalCount: number }>;
 }
 
 /**

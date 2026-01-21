@@ -716,6 +716,23 @@ export interface JellystatImportResult {
   }[];
 }
 
+// Library sync progress types
+export interface LibrarySyncProgress {
+  serverId: string;
+  serverName: string;
+  status: 'running' | 'complete' | 'error';
+  currentLibrary?: string;
+  currentLibraryName?: string;
+  totalLibraries: number;
+  processedLibraries: number;
+  totalItems: number;
+  processedItems: number;
+  message: string;
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
+}
+
 // WebSocket event types
 export interface ServerToClientEvents {
   'session:started': (session: ActiveSession) => void;
@@ -726,6 +743,7 @@ export interface ServerToClientEvents {
   'import:progress': (progress: TautulliImportProgress) => void;
   'import:jellystat:progress': (progress: JellystatImportProgress) => void;
   'maintenance:progress': (progress: MaintenanceJobProgress) => void;
+  'library:sync:progress': (progress: LibrarySyncProgress) => void;
   'version:update': (data: { current: string; latest: string; releaseUrl: string }) => void;
   'server:down': (data: { serverId: string; serverName: string }) => void;
   'server:up': (data: { serverId: string; serverName: string }) => void;
@@ -1573,4 +1591,466 @@ export interface BandwidthSummary {
   avgBitrateMbps: number;
   peakBitrateMbps: number;
   totalHours: number;
+}
+
+// =============================================================================
+// Library Statistics Types
+// =============================================================================
+
+// Library Stats Response (GET /library/stats)
+export interface LibraryStatsResponse {
+  totalItems: number;
+  totalSizeBytes: string;
+  movieCount: number;
+  episodeCount: number;
+  showCount: number;
+  qualityBreakdown: {
+    count4k: number;
+    count1080p: number;
+    count720p: number;
+    countSd: number;
+  };
+  asOf: string | null;
+}
+
+// Library Growth Response (GET /library/growth)
+export interface GrowthDataPoint {
+  day: string;
+  total: number;
+  additions: number;
+}
+
+export interface LibraryGrowthResponse {
+  period: string;
+  movies: GrowthDataPoint[];
+  episodes: GrowthDataPoint[];
+  music: GrowthDataPoint[];
+}
+
+// Library Quality Response (GET /library/quality)
+export interface QualityDataPoint {
+  day: string;
+  totalItems: number;
+  count4k: number;
+  count1080p: number;
+  count720p: number;
+  countSd: number;
+  pct4k: number;
+  pct1080p: number;
+  pct720p: number;
+  pctSd: number;
+  hevcCount: number;
+  h264Count: number;
+  av1Count: number;
+}
+
+export interface LibraryQualityResponse {
+  period: string;
+  mediaType: 'all' | 'movies' | 'shows';
+  data: QualityDataPoint[];
+}
+
+// Library Storage Response (GET /library/storage)
+export interface StorageHistoryPoint {
+  day: string;
+  totalSizeBytes: string;
+}
+
+export interface StoragePrediction {
+  predicted: string;
+  min: string;
+  max: string;
+}
+
+export interface LibraryStorageResponse {
+  current: {
+    totalSizeBytes: string;
+    totalItems: number;
+    lastUpdated: string | null;
+  };
+  history: StorageHistoryPoint[];
+  growthRate: {
+    bytesPerDay: string;
+    bytesPerWeek: string;
+    bytesPerMonth: string;
+  };
+  predictions: {
+    day30: StoragePrediction | null;
+    day90: StoragePrediction | null;
+    day365: StoragePrediction | null;
+    confidence: 'high' | 'medium' | 'low' | null;
+    minDataDays: number;
+    currentDataDays: number;
+    message?: string;
+  };
+}
+
+// Library Duplicates Response (GET /library/duplicates)
+export type MatchType = 'imdb' | 'tmdb' | 'tvdb' | 'fuzzy';
+
+export interface DuplicateItem {
+  id: string;
+  serverId: string;
+  serverName: string;
+  title: string;
+  year: number | null;
+  mediaType: string;
+  fileSize: number | null;
+  resolution: string | null;
+}
+
+export interface DuplicateGroup {
+  matchKey: string;
+  matchType: MatchType;
+  confidence: number;
+  serverCount: number;
+  items: DuplicateItem[];
+  totalStorageBytes: number;
+  potentialSavingsBytes: number;
+}
+
+export interface DuplicatesSummary {
+  totalGroups: number;
+  totalDuplicateItems: number;
+  totalPotentialSavingsBytes: number;
+  byMatchType: { imdb: number; tmdb: number; tvdb: number; fuzzy: number };
+}
+
+export interface DuplicatesResponse {
+  duplicates: DuplicateGroup[];
+  summary: DuplicatesSummary;
+  pagination: { page: number; pageSize: number; total: number };
+}
+
+// Library Stale Content Response (GET /library/stale)
+export type StaleCategory = 'never_watched' | 'stale';
+
+export interface StaleItem {
+  id: string;
+  serverId: string;
+  serverName: string;
+  libraryId: string;
+  libraryName: string;
+  title: string;
+  mediaType: string;
+  year: number | null;
+  fileSize: number | null;
+  resolution: string | null;
+  addedAt: string;
+  lastWatched: string | null;
+  watchCount: number;
+  category: StaleCategory;
+  daysStale: number;
+}
+
+export interface StaleSummary {
+  neverWatched: { count: number; sizeBytes: number };
+  stale: { count: number; sizeBytes: number };
+  total: { count: number; sizeBytes: number };
+  threshold: { days: number };
+}
+
+export interface StaleResponse {
+  items: StaleItem[];
+  summary: StaleSummary;
+  pagination: { page: number; pageSize: number; total: number };
+}
+
+// Library Watch Statistics Response (GET /library/watch)
+export interface WatchItem {
+  id: string;
+  serverId: string;
+  serverName: string;
+  libraryId: string;
+  title: string;
+  mediaType: string;
+  year: number | null;
+  fileSize: number | null;
+  resolution: string | null;
+  addedAt: string;
+  watchCount: number;
+  totalWatchMs: number;
+  lastWatchedAt: string | null;
+}
+
+export interface WatchSummary {
+  totalItems: number;
+  watchedCount: number;
+  unwatchedCount: number;
+  watchedPct: number;
+  totalWatchMs: number;
+  avgWatchesPerItem: number;
+}
+
+export interface WatchResponse {
+  items: WatchItem[];
+  summary: WatchSummary;
+  pagination: { page: number; pageSize: number; total: number };
+}
+
+// Library Completion Response (GET /library/completion)
+export type CompletionStatus = 'completed' | 'in_progress' | 'not_started';
+
+export interface CompletionItem {
+  id: string;
+  serverId: string;
+  serverName: string;
+  title: string;
+  mediaType: string;
+  completionPct: number;
+  watchedMs: number;
+  runtimeMs: number;
+  showTitle: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  status: CompletionStatus;
+  lastWatchedAt: string | null;
+}
+
+export interface SeasonCompletion {
+  serverId: string;
+  serverName: string;
+  showTitle: string;
+  seasonNumber: number;
+  totalEpisodes: number;
+  completedEpisodes: number;
+  inProgressEpisodes: number;
+  completionPct: number;
+  status: CompletionStatus;
+}
+
+export interface SeriesCompletion {
+  serverId: string;
+  serverName: string;
+  showTitle: string;
+  totalSeasons: number;
+  completedSeasons: number;
+  totalEpisodes: number;
+  completedEpisodes: number;
+  avgSeasonCompletionPct: number;
+  status: CompletionStatus;
+}
+
+export interface CompletionSummary {
+  totalItems: number;
+  completedCount: number;
+  inProgressCount: number;
+  notStartedCount: number;
+  overallCompletionPct: number;
+}
+
+export interface CompletionPaginationInfo {
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export type CompletionResponse =
+  | { items: CompletionItem[]; summary: CompletionSummary; pagination: CompletionPaginationInfo }
+  | {
+      seasons: SeasonCompletion[];
+      summary: CompletionSummary;
+      pagination: CompletionPaginationInfo;
+    }
+  | {
+      series: SeriesCompletion[];
+      summary: CompletionSummary;
+      pagination: CompletionPaginationInfo;
+    };
+
+// Library Watch Patterns Response (GET /library/patterns)
+export interface BingeShow {
+  showTitle: string;
+  serverId: string;
+  thumbPath: string | null;
+  totalEpisodeWatches: number;
+  consecutiveEpisodes: number;
+  consecutivePct: number;
+  avgGapMinutes: number;
+  bingeScore: number;
+  maxEpisodesInOneDay: number;
+}
+
+export interface HourlyDistribution {
+  hour: number;
+  watchCount: number;
+  totalWatchMs: number;
+  pctOfTotal: number;
+}
+
+export interface MonthlyTrend {
+  month: string;
+  watchCount: number;
+  totalWatchMs: number;
+  uniqueItems: number;
+  avgWatchesPerDay: number;
+}
+
+export interface PatternsResponse {
+  bingeShows: BingeShow[];
+  peakTimes: {
+    hourlyDistribution: HourlyDistribution[];
+    peakHour: number;
+    peakDayOfWeek: number;
+  };
+  seasonalTrends: {
+    monthlyTrends: MonthlyTrend[];
+    busiestMonth: string;
+    quietestMonth: string;
+  };
+  summary: {
+    totalWatchSessions: number;
+    avgSessionsPerDay: number;
+    bingeSessionsPct: number;
+  };
+}
+
+// Library ROI Response (GET /library/roi)
+export type ValueCategory = 'low_value' | 'moderate_value' | 'high_value';
+
+export interface RoiItem {
+  id: string;
+  serverId: string;
+  title: string;
+  mediaType: string;
+  year: number | null;
+  fileSizeBytes: number;
+  fileSizeGb: number;
+  watchCount: number;
+  totalWatchMs: number;
+  totalWatchHours: number;
+  lastWatchedAt: string | null;
+  daysSinceLastWatch: number | null;
+  watchHoursPerGb: number;
+  valueScore: number;
+  valueCategory: ValueCategory;
+  suggestDeletion: boolean;
+}
+
+export interface RoiSummary {
+  totalItems: number;
+  totalStorageGb: number;
+  totalWatchHours: number;
+  avgWatchHoursPerGb: number;
+  lowValueItems: number;
+  lowValueStorageGb: number;
+  potentialSavingsGb: number;
+}
+
+export interface ValueThresholds {
+  movie: { lowValue: number; highValue: number };
+  episode: { lowValue: number; highValue: number };
+  show: { lowValue: number; highValue: number };
+}
+
+export interface RoiResponse {
+  items: RoiItem[];
+  summary: RoiSummary;
+  thresholds: ValueThresholds;
+  pagination: { page: number; pageSize: number; total: number };
+}
+
+// Library Top Content Types (GET /library/top-movies, /library/top-shows)
+export interface TopMovie {
+  ratingKey: string;
+  title: string;
+  year: number | null;
+  thumbPath: string | null;
+  serverId: string;
+  totalPlays: number;
+  totalWatchHours: number;
+  uniqueViewers: number;
+  completionRate: number;
+}
+
+export interface TopMoviesSummary {
+  totalMovies: number;
+  totalWatchHours: number;
+}
+
+export interface TopMoviesResponse {
+  items: TopMovie[];
+  summary: TopMoviesSummary;
+  pagination: { page: number; pageSize: number; total: number };
+}
+
+export interface TopShow {
+  showTitle: string;
+  year: number | null;
+  thumbPath: string | null;
+  serverId: string;
+  totalEpisodeViews: number;
+  totalWatchHours: number;
+  uniqueViewers: number;
+  avgCompletionRate: number;
+  bingeScore: number;
+}
+
+export interface TopShowsSummary {
+  totalShows: number;
+  totalWatchHours: number;
+}
+
+export interface TopShowsResponse {
+  items: TopShow[];
+  summary: TopShowsSummary;
+  pagination: { page: number; pageSize: number; total: number };
+}
+
+// ============================================================================
+// Library Codecs Types
+// ============================================================================
+
+/** Single codec entry with count and percentage */
+export interface CodecEntry {
+  codec: string;
+  count: number;
+  percentage: number;
+}
+
+/** Codec breakdown for a category (video, audio, or music) */
+export interface CodecBreakdown {
+  codecs: CodecEntry[];
+  total: number;
+}
+
+/** Response from /library/codecs endpoint */
+export interface LibraryCodecsResponse {
+  /** Video codecs for movies and episodes */
+  video: CodecBreakdown;
+  /** Audio codecs for movies and episodes */
+  audio: CodecBreakdown;
+  /** Audio channel configurations (Stereo, 5.1, 7.1, etc.) for movies and episodes */
+  channels: CodecBreakdown;
+  /** Audio codecs for music tracks */
+  music: CodecBreakdown;
+}
+
+// ============================================================================
+// Library Resolution Types
+// ============================================================================
+
+/** Single resolution entry with count and percentage */
+export interface ResolutionEntry {
+  resolution: string;
+  count: number;
+  percentage: number;
+}
+
+/** Resolution breakdown for a media type */
+export interface ResolutionBreakdown {
+  count4k: number;
+  count1080p: number;
+  count720p: number;
+  countSd: number;
+  total: number;
+  entries: ResolutionEntry[];
+}
+
+/** Response from /library/resolution endpoint */
+export interface LibraryResolutionResponse {
+  /** Resolution breakdown for movies */
+  movies: ResolutionBreakdown;
+  /** Resolution breakdown for TV episodes */
+  tv: ResolutionBreakdown;
 }

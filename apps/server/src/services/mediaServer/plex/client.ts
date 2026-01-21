@@ -12,6 +12,7 @@ import type {
   MediaSession,
   MediaUser,
   MediaLibrary,
+  MediaLibraryItem,
   MediaWatchHistoryItem,
   MediaServerConfig,
 } from '../types.js';
@@ -26,6 +27,7 @@ import {
   parseSharedServersXml,
   parseStatisticsResourcesResponse,
   parseMediaMetadataResponse,
+  parseLibraryItemsResponse,
   getTranscodingSessionRatingKeys,
   type PlexServerResource,
   type PlexStatisticsDataPoint,
@@ -165,6 +167,87 @@ export class PlexClient implements IMediaServerClient, IMediaServerClientWithHis
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Get all items in a library with pagination and external IDs
+   *
+   * Uses /library/sections/{id}/all endpoint with includeGuids=1 to get
+   * external IDs (IMDB, TMDB, TVDB) in the Guid array.
+   *
+   * @param libraryId - The library section ID
+   * @param options - Pagination options (offset, limit)
+   * @returns Items and total count for pagination tracking
+   */
+  async getLibraryItems(
+    libraryId: string,
+    options?: { offset?: number; limit?: number }
+  ): Promise<{ items: MediaLibraryItem[]; totalCount: number }> {
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? 100;
+
+    const params = new URLSearchParams({
+      includeGuids: '1', // CRITICAL: Required for external IDs
+      'X-Plex-Container-Start': String(offset),
+      'X-Plex-Container-Size': String(limit),
+    });
+
+    const data = await fetchJson<unknown>(
+      `${this.baseUrl}/library/sections/${libraryId}/all?${params}`,
+      {
+        headers: this.buildHeaders(),
+        service: 'plex',
+        timeout: 30000, // 30s timeout for large responses
+      }
+    );
+
+    // Extract totalSize from MediaContainer
+    const container = data as { MediaContainer?: { totalSize?: number } };
+    const totalCount = container?.MediaContainer?.totalSize ?? 0;
+
+    const items = parseLibraryItemsResponse(data);
+
+    return { items, totalCount };
+  }
+
+  /**
+   * Get all leaf items (episodes) from a library section
+   *
+   * For TV show libraries, this returns all episodes across all shows.
+   * Uses the /library/sections/{id}/allLeaves endpoint.
+   *
+   * @param libraryId - Library section ID
+   * @param options - Pagination options
+   * @returns Episodes and total count for pagination tracking
+   */
+  async getLibraryLeaves(
+    libraryId: string,
+    options?: { offset?: number; limit?: number }
+  ): Promise<{ items: MediaLibraryItem[]; totalCount: number }> {
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? 100;
+
+    const params = new URLSearchParams({
+      includeGuids: '1',
+      'X-Plex-Container-Start': String(offset),
+      'X-Plex-Container-Size': String(limit),
+    });
+
+    const data = await fetchJson<unknown>(
+      `${this.baseUrl}/library/sections/${libraryId}/allLeaves?${params}`,
+      {
+        headers: this.buildHeaders(),
+        service: 'plex',
+        timeout: 30000,
+      }
+    );
+
+    const container = data as { MediaContainer?: { totalSize?: number } };
+    const totalCount = container?.MediaContainer?.totalSize ?? 0;
+
+    const items = parseLibraryItemsResponse(data);
+
+    return { items, totalCount };
   }
 
   // ==========================================================================

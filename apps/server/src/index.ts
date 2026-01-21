@@ -34,6 +34,7 @@ import type {
   TautulliImportProgress,
   JellystatImportProgress,
   MaintenanceJobProgress,
+  LibrarySyncProgress,
 } from '@tracearr/shared';
 
 import authPlugin from './plugins/auth.js';
@@ -57,6 +58,7 @@ import { channelRoutingRoutes } from './routes/channelRouting.js';
 import { versionRoutes } from './routes/version.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
 import { publicRoutes } from './routes/public.js';
+import { libraryRoutes } from './routes/library.js';
 import { getPollerSettings, getNetworkSettings } from './routes/settings.js';
 import { initializeEncryption, migrateToken, looksEncrypted } from './utils/crypto.js';
 import { geoipService } from './services/geoip.js';
@@ -82,6 +84,12 @@ import {
   shutdownMaintenanceQueue,
 } from './jobs/maintenanceQueue.js';
 import {
+  initLibrarySyncQueue,
+  startLibrarySyncWorker,
+  scheduleAutoSync,
+  shutdownLibrarySyncQueue,
+} from './jobs/librarySyncQueue.js';
+import {
   initVersionCheckQueue,
   startVersionCheckWorker,
   scheduleVersionChecks,
@@ -102,6 +110,9 @@ import { servers } from './db/schema.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0';
+
+// WebSocket subscriber - module level so it can be cleaned up in onClose hook
+let wsSubscriber: Redis | null = null;
 
 async function buildApp(options: { trustProxy?: boolean } = {}) {
   const app = Fastify({
@@ -292,6 +303,22 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     // Don't throw - maintenance jobs are non-critical
   }
 
+  // Initialize library sync queue (uses Redis for job storage)
+  try {
+    initLibrarySyncQueue(redisUrl);
+    startLibrarySyncWorker();
+    // Schedule auto-sync after a small delay to ensure all services are initialized
+    setTimeout(() => {
+      scheduleAutoSync().catch((err) => {
+        app.log.error({ err }, 'Failed to schedule library auto-sync');
+      });
+    }, 5000);
+    app.log.info('Library sync queue initialized');
+  } catch (err) {
+    app.log.error({ err }, 'Failed to initialize library sync queue');
+    // Don't throw - library sync is non-critical
+  }
+
   // Initialize version check queue (uses Redis for job storage and caching)
   try {
     initVersionCheckQueue(redisUrl, app.redis, pubSubService.publish.bind(pubSubService));
@@ -334,12 +361,14 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     }
     stopImageCacheCleanup();
     await pubSubRedis.quit();
+    if (wsSubscriber) await wsSubscriber.quit();
     stopPoller();
     await sseManager.stop();
     stopSSEProcessor();
     await shutdownNotificationQueue();
     await shutdownImportQueue();
     await shutdownMaintenanceQueue();
+    await shutdownLibrarySyncQueue();
     await shutdownVersionCheckQueue();
     await shutdownInactivityCheckQueue();
   });
@@ -414,6 +443,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   await app.register(versionRoutes, { prefix: `${API_BASE_PATH}/version` });
   await app.register(maintenanceRoutes, { prefix: `${API_BASE_PATH}/maintenance` });
   await app.register(publicRoutes, { prefix: `${API_BASE_PATH}/public` });
+  await app.register(libraryRoutes, { prefix: `${API_BASE_PATH}/library` });
 
   // Serve static frontend in production
   const webDistPath = resolve(PROJECT_ROOT, 'apps/web/dist');
@@ -449,6 +479,7 @@ async function start() {
         stopPoller();
         void shutdownNotificationQueue();
         void shutdownImportQueue();
+        void shutdownLibrarySyncQueue();
         void shutdownVersionCheckQueue();
         void shutdownInactivityCheckQueue();
         void app.close().then(() => process.exit(0));
@@ -465,7 +496,7 @@ async function start() {
 
     // Set up Redis pub/sub to forward events to WebSocket clients
     const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
-    const wsSubscriber = new Redis(redisUrl);
+    wsSubscriber = new Redis(redisUrl);
 
     void wsSubscriber.subscribe(REDIS_KEYS.PUBSUB_EVENTS, (err) => {
       if (err) {
@@ -509,6 +540,9 @@ async function start() {
           case WS_EVENTS.MAINTENANCE_PROGRESS:
             broadcastToSessions('maintenance:progress', data as MaintenanceJobProgress);
             break;
+          case WS_EVENTS.LIBRARY_SYNC_PROGRESS:
+            broadcastToSessions('library:sync:progress', data as LibrarySyncProgress);
+            break;
           case WS_EVENTS.VERSION_UPDATE:
             broadcastToSessions(
               'version:update',
@@ -522,11 +556,6 @@ async function start() {
       } catch (err) {
         app.log.error({ err, message }, 'Failed to process pub/sub message');
       }
-    });
-
-    // Note: WebSocket subscriber cleanup is handled in Fastify's onClose hook
-    app.addHook('onClose', async () => {
-      await wsSubscriber.quit();
     });
 
     // Start session poller after server is listening (uses DB settings)
