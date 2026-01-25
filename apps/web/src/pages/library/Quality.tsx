@@ -1,16 +1,16 @@
 import { useMemo, useState } from 'react';
-import { BarChart3, Film, Tv } from 'lucide-react';
+import { Film, Tv } from 'lucide-react';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   ErrorState,
-  EmptyState,
+  LibraryEmptyState,
   CodecDistributionSection,
   ResolutionDistributionSection,
 } from '@/components/library';
 import { QualityTimelineChart } from '@/components/charts';
-import { useLibraryQuality } from '@/hooks/queries';
+import { useLibraryQuality, useLibraryStatus } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
 
@@ -20,6 +20,9 @@ export function LibraryQuality() {
   const { selectedServerId } = useServer();
   const { value: timeRange, setValue: setTimeRange } = useTimeRange();
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all');
+
+  // Check library status first
+  const status = useLibraryStatus(selectedServerId);
 
   // Map TimeRangePicker periods to API format
   const apiPeriod = useMemo(() => {
@@ -61,16 +64,15 @@ export function LibraryQuality() {
     );
   }
 
-  // Show empty state if no quality data
-  if (!quality.isLoading && (!quality.data?.data || quality.data.data.length === 0)) {
+  // Show empty state if library not synced or needs backfill
+  const needsSetup =
+    !status.isLoading &&
+    (!status.data?.isSynced || status.data?.needsBackfill || status.data?.isBackfillRunning);
+  if (needsSetup) {
     return (
       <div className="space-y-6">
         {header}
-        <EmptyState
-          icon={BarChart3}
-          title="No quality data yet"
-          description="Quality metrics will appear here once library snapshots have been collected. This typically happens automatically within 24 hours."
-        />
+        <LibraryEmptyState onComplete={quality.refetch} />
       </div>
     );
   }

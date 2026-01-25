@@ -18,6 +18,7 @@ import { libraryCompletionRoute } from './completion.js';
 import { libraryTopContentRoute } from './topContent.js';
 import { libraryCodecsRoute } from './codecs.js';
 import { libraryResolutionRoute } from './resolution.js';
+import { libraryStatusRoute } from './status.js';
 
 export const libraryStatsRoutes: FastifyPluginAsync = async (app) => {
   // Register all sub-route plugins
@@ -35,6 +36,7 @@ export const libraryStatsRoutes: FastifyPluginAsync = async (app) => {
   await app.register(libraryTopContentRoute);
   await app.register(libraryCodecsRoute);
   await app.register(libraryResolutionRoute);
+  await app.register(libraryStatusRoute);
 };
 
 // Re-export utilities for potential use by other modules

@@ -2,7 +2,7 @@
  * Tautulli API integration and import service
  */
 
-import { eq, and, isNull, isNotNull, sql, gte } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { TautulliImportProgress, TautulliImportResult } from '@tracearr/shared';
 import { db } from '../db/client.js';
@@ -1245,9 +1245,7 @@ export class TautulliService {
       // Query sessions missing quality data that have an externalSessionId
       // Only enrich sessions where sourceVideoCodec is NULL (indicates no stream data)
       // Order by externalSessionId DESC to process recent sessions first (higher row_id = more recent)
-      // Tautulli may have purged stream data for older sessions, so limit to last 90 days
-      // Time bounds enable TimescaleDB chunk exclusion to avoid lock exhaustion
-      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+      // Note: Tautulli may have purged stream data for older sessions, those will be skipped
       const sessionsToEnrich = await db
         .select({
           id: sessions.id,
@@ -1259,9 +1257,7 @@ export class TautulliService {
           and(
             eq(sessions.serverId, serverId),
             isNotNull(sessions.externalSessionId),
-            isNull(sessions.sourceVideoCodec),
-            // Time bounds for TimescaleDB chunk exclusion
-            gte(sessions.startedAt, ninetyDaysAgo)
+            isNull(sessions.sourceVideoCodec)
           )
         )
         .orderBy(sql`CAST(${sessions.externalSessionId} AS INTEGER) DESC`)

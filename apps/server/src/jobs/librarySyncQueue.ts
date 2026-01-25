@@ -177,9 +177,16 @@ export function startLibrarySyncWorker(): void {
     {
       connection: connectionOptions,
       concurrency: 2, // Allow 2 concurrent syncs (different servers)
-      lockDuration: 30 * 60 * 1000, // 30 minutes - large libraries take time
+      lockDuration: 60 * 60 * 1000, // 1 hour - large libraries take time
+      stalledInterval: 30 * 1000, // Check for stalled jobs every 30 seconds
+      maxStalledCount: 2, // Retry stalled jobs up to 2 times before failing
     }
   );
+
+  // Handle stalled jobs
+  librarySyncWorker.on('stalled', (jobId) => {
+    console.warn(`[LibrarySync] Job ${jobId} stalled - will be retried`);
+  });
 
   // Handle job failures
   librarySyncWorker.on('failed', (job, error) => {
@@ -311,7 +318,7 @@ export async function scheduleAutoSync(): Promise<void> {
       },
       {
         repeat: {
-          pattern: '0 */6 * * *', // Every 6 hours
+          pattern: '0 * * * *', // Every hour
           tz: 'UTC',
         },
         jobId: `scheduled-${server.id}`,
@@ -319,7 +326,7 @@ export async function scheduleAutoSync(): Promise<void> {
     );
   }
 
-  console.log(`[LibrarySync] Scheduled auto-sync for ${allServers.length} server(s) every 6 hours`);
+  console.log(`[LibrarySync] Scheduled auto-sync for ${allServers.length} server(s) every hour`);
 
   // Queue an immediate sync on boot (non-blocking, staggered to avoid overwhelming startup)
   // Check for any pending/delayed jobs first to avoid duplicates after rapid restarts

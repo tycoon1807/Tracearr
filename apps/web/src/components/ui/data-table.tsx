@@ -33,6 +33,7 @@ interface DataTableProps<TData, TValue> {
   onRowClick?: (row: TData) => void;
   emptyMessage?: string;
   className?: string;
+  compact?: boolean;
   // Server-side pagination props
   pageCount?: number;
   page?: number;
@@ -64,6 +65,7 @@ export function DataTable<TData, TValue>({
   onRowClick,
   emptyMessage = 'No results found.',
   className,
+  compact = false,
   pageCount,
   page,
   onPageChange,
@@ -198,7 +200,10 @@ export function DataTable<TData, TValue>({
                 {headerGroup.headers.map((header) => (
                   <TableHead
                     key={header.id}
-                    className={cn('px-4 py-3', header.column.id === '_select' && 'w-12')}
+                    className={cn(
+                      compact ? 'px-3 py-2' : 'px-4 py-3',
+                      header.column.id === '_select' && 'w-12'
+                    )}
                   >
                     {header.isPlaceholder ? null : header.column.id === '_select' ? (
                       flexRender(header.column.columnDef.header, header.getContext())
@@ -253,7 +258,10 @@ export function DataTable<TData, TValue>({
                     {row.getVisibleCells().map((cell) => (
                       <TableCell
                         key={cell.id}
-                        className={cn('px-4 py-3', cell.column.id === '_select' && 'w-12')}
+                        className={cn(
+                          compact ? 'px-3 py-1.5' : 'px-4 py-3',
+                          cell.column.id === '_select' && 'w-12'
+                        )}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>

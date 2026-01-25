@@ -135,14 +135,20 @@ export function startImportWorker(): void {
       connection: connectionOptions,
       concurrency: 1, // Only 1 import at a time per worker
       // Large imports (300k+ records) can take hours - extend lock to prevent stalled job detection
-      lockDuration: 5 * 60 * 1000, // 5 minutes (default is 30s)
-      stalledInterval: 5 * 60 * 1000, // Check for stalled jobs every 5 minutes
+      lockDuration: 2 * 60 * 60 * 1000, // 2 hours - large imports can take a long time
+      stalledInterval: 30 * 1000, // Check for stalled jobs every 30 seconds
+      maxStalledCount: 2, // Retry stalled jobs up to 2 times before failing
       limiter: {
         max: 1,
         duration: 60000, // Max 1 new import per minute (prevents spam)
       },
     }
   );
+
+  // Handle stalled jobs
+  importWorker.on('stalled', (jobId) => {
+    console.warn(`[Import] Job ${jobId} stalled - will be retried`);
+  });
 
   // Handle job failures - notify frontend and move to DLQ if retries exhausted
   importWorker.on('failed', (job, error) => {

@@ -123,4 +123,6 @@ export {
   useTopShows,
   useLibraryCodecs,
   useLibraryResolution,
+  useLibraryStatus,
+  type LibraryStatusResponse,
 } from './useLibrary';

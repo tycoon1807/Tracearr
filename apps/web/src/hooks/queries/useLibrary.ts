@@ -318,3 +318,30 @@ export function useLibraryResolution(serverId?: string | null, libraryId?: strin
     staleTime: LIBRARY_STALE_TIME,
   });
 }
+
+/** Library status response type */
+export interface LibraryStatusResponse {
+  isSynced: boolean;
+  isSyncRunning: boolean;
+  needsBackfill: boolean;
+  isBackfillRunning: boolean;
+  backfillState: 'active' | 'waiting' | 'delayed' | null;
+  itemCount: number;
+  snapshotCount: number;
+  earliestItemDate: string | null;
+  earliestSnapshotDate: string | null;
+  backfillDays: number | null;
+}
+
+/**
+ * Fetch library sync and backfill status
+ * Used to determine if library needs syncing or if snapshots need backfilling
+ */
+export function useLibraryStatus(serverId?: string | null) {
+  return useQuery<LibraryStatusResponse>({
+    queryKey: ['library', 'status', serverId],
+    queryFn: () => api.library.status(serverId ?? undefined),
+    // Shorter stale time since this is used for real-time status checking
+    staleTime: 1000 * 30, // 30 seconds
+  });
+}

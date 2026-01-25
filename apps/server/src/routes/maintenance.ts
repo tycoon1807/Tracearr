@@ -54,6 +54,17 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
           description:
             'Recreates all TimescaleDB continuous aggregates and engagement views. ' +
             'Run this after upgrading if you see database errors about missing views or columns.',
+          options: [
+            {
+              name: 'fullRefresh',
+              label: 'Include Full Historical Refresh',
+              description:
+                'Also refresh all historical data for continuous aggregates. ' +
+                'Enable this if Watch Analytics shows incorrect counts. May take several minutes for large libraries.',
+              type: 'boolean',
+              default: false,
+            },
+          ],
         },
         {
           type: 'normalize_codecs',
@@ -82,8 +93,11 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * POST /maintenance/jobs/:type - Start a maintenance job
+   *
+   * Body (optional):
+   * - fullRefresh: boolean - For rebuild_timescale_views, also refresh all historical data
    */
-  app.post<{ Params: { type: string } }>(
+  app.post<{ Params: { type: string }; Body: { fullRefresh?: boolean } }>(
     '/jobs/:type',
     { preHandler: [app.authenticate] },
     async (request, reply) => {
@@ -93,6 +107,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const { type } = request.params;
+      const { fullRefresh } = request.body || {};
 
       // Validate job type
       const validTypes: MaintenanceJobType[] = [
@@ -108,8 +123,16 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         return reply.badRequest(`Invalid job type: ${type}`);
       }
 
+      // Build options for specific job types
+      const options =
+        type === 'rebuild_timescale_views' && fullRefresh ? { fullRefresh: true } : undefined;
+
       try {
-        const jobId = await enqueueMaintenanceJob(type as MaintenanceJobType, authUser.userId);
+        const jobId = await enqueueMaintenanceJob(
+          type as MaintenanceJobType,
+          authUser.userId,
+          options
+        );
         return {
           status: 'queued',
           jobId,

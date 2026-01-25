@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import {
   Wrench,
   Play,
@@ -34,10 +36,19 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
+interface JobOption {
+  name: string;
+  label: string;
+  description: string;
+  type: 'boolean';
+  default: boolean;
+}
+
 interface JobDefinition {
   type: string;
   name: string;
   description: string;
+  options?: JobOption[];
 }
 
 interface JobHistoryItem {
@@ -85,7 +96,21 @@ export function JobsSettings() {
   const [runningJob, setRunningJob] = useState<string | null>(null);
   const [progress, setProgress] = useState<MaintenanceJobProgress | null>(null);
   const [confirmJob, setConfirmJob] = useState<JobDefinition | null>(null);
+  const [jobOptions, setJobOptions] = useState<Record<string, boolean>>({});
   const { socket } = useSocket();
+
+  // Reset options when confirm dialog opens
+  const openConfirmDialog = useCallback((job: JobDefinition) => {
+    // Initialize options with defaults
+    const defaults: Record<string, boolean> = {};
+    job.options?.forEach((opt) => {
+      if (opt.type === 'boolean') {
+        defaults[opt.name] = opt.default;
+      }
+    });
+    setJobOptions(defaults);
+    setConfirmJob(job);
+  }, []);
 
   // Fetch available jobs
   useEffect(() => {
@@ -169,7 +194,7 @@ export function JobsSettings() {
     };
   }, [socket, fetchHistory]);
 
-  const handleStartJob = async (type: string) => {
+  const handleStartJob = async (type: string, options?: Record<string, boolean>) => {
     setConfirmJob(null);
     setRunningJob(type);
     setProgress({
@@ -184,7 +209,9 @@ export function JobsSettings() {
     });
 
     try {
-      await api.maintenance.startJob(type);
+      // Only pass options if there are any truthy values
+      const hasOptions = options && Object.values(options).some(Boolean);
+      await api.maintenance.startJob(type, hasOptions ? options : undefined);
     } catch (err) {
       setRunningJob(null);
       setProgress(null);
@@ -266,7 +293,7 @@ export function JobsSettings() {
                     </div>
                   </div>
                   <Button
-                    onClick={() => setConfirmJob(job)}
+                    onClick={() => openConfirmDialog(job)}
                     disabled={runningJob !== null}
                     size="sm"
                     className="shrink-0 self-start sm:self-center"
@@ -489,6 +516,33 @@ export function JobsSettings() {
             <DialogTitle>Run {confirmJob?.name}?</DialogTitle>
             <DialogDescription className="text-sm">{confirmJob?.description}</DialogDescription>
           </DialogHeader>
+
+          {/* Job-specific options */}
+          {confirmJob?.options && confirmJob.options.length > 0 && (
+            <div className="space-y-3">
+              {confirmJob.options.map((opt) => (
+                <div key={opt.name} className="flex items-start gap-3 rounded-lg border p-3">
+                  <Checkbox
+                    id={`option-${opt.name}`}
+                    checked={jobOptions[opt.name] ?? opt.default}
+                    onCheckedChange={(checked) =>
+                      setJobOptions((prev) => ({ ...prev, [opt.name]: checked === true }))
+                    }
+                  />
+                  <div className="flex-1 space-y-1">
+                    <Label
+                      htmlFor={`option-${opt.name}`}
+                      className="cursor-pointer text-sm leading-none font-medium"
+                    >
+                      {opt.label}
+                    </Label>
+                    <p className="text-muted-foreground text-xs">{opt.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="flex items-start gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
             <div className="text-sm">
@@ -503,7 +557,7 @@ export function JobsSettings() {
             <Button variant="outline" onClick={() => setConfirmJob(null)}>
               Cancel
             </Button>
-            <Button onClick={() => confirmJob && handleStartJob(confirmJob.type)}>
+            <Button onClick={() => confirmJob && handleStartJob(confirmJob.type, jobOptions)}>
               <Play className="mr-1.5 h-3.5 w-3.5" />
               Start Job
             </Button>

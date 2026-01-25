@@ -16,7 +16,11 @@
   "storage": "Speicher",
   "watch": "Gesehen",
   "performance": "Leistung",
+<<<<<<< HEAD
   "devices": "Geräte",
+=======
+  "devices": "Geräze",
+>>>>>>> upstream/main
   "bandwidth": "Bandbreite",
   "jobs": "Aufträge",
   "accessControl": "Zugangs kontrolle"

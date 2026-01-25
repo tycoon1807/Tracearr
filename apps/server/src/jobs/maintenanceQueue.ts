@@ -39,6 +39,10 @@ function getCountryCode(name: string): string | undefined {
 export interface MaintenanceJobData {
   type: MaintenanceJobType;
   userId: string; // Audit trail - who initiated the job
+  options?: {
+    /** For rebuild_timescale_views: refresh all historical data (slow but complete) */
+    fullRefresh?: boolean;
+  };
 }
 
 // Queue configuration
@@ -114,10 +118,17 @@ export function startMaintenanceWorker(): void {
     {
       connection: connectionOptions,
       concurrency: 1, // Only 1 maintenance job at a time
-      lockDuration: 10 * 60 * 1000, // 10 minutes
-      stalledInterval: 10 * 60 * 1000, // Check for stalled jobs every 10 minutes
+      lockDuration: 60 * 60 * 1000, // 1 hour - maintenance jobs can be long-running
+      stalledInterval: 30 * 1000, // Check for stalled jobs every 30 seconds
+      maxStalledCount: 2, // Retry stalled jobs up to 2 times before failing
     }
   );
+
+  // Handle stalled jobs - clear state so UI updates correctly
+  maintenanceWorker.on('stalled', (jobId) => {
+    console.warn(`[Maintenance] Job ${jobId} stalled - will be retried`);
+    activeJobProgress = null;
+  });
 
   // Handle job failures
   maintenanceWorker.on('failed', (job, error) => {
@@ -884,18 +895,23 @@ async function processRebuildTimescaleViewsJob(
   try {
     await publishProgress();
 
-    // Call the rebuild function with progress callback
-    const result = await rebuildTimescaleViews((step, total, message) => {
-      if (activeJobProgress) {
-        activeJobProgress.processedRecords = step;
-        activeJobProgress.totalRecords = total;
-        activeJobProgress.message = message;
-        void publishProgress();
-      }
+    const fullRefresh = job.data.options?.fullRefresh ?? false;
 
-      // Update job progress percentage
-      const percent = Math.round((step / total) * 100);
-      void job.updateProgress(percent);
+    // Call the rebuild function with options
+    const result = await rebuildTimescaleViews({
+      fullRefresh,
+      progressCallback: (step, total, message) => {
+        if (activeJobProgress) {
+          activeJobProgress.processedRecords = step;
+          activeJobProgress.totalRecords = total;
+          activeJobProgress.message = message;
+          void publishProgress();
+        }
+
+        // Update job progress percentage
+        const percent = Math.round((step / total) * 100);
+        void job.updateProgress(percent);
+      },
     });
 
     const durationMs = Date.now() - startTime;
@@ -1558,7 +1574,8 @@ export function getMaintenanceProgress(): MaintenanceJobProgress | null {
  */
 export async function enqueueMaintenanceJob(
   type: MaintenanceJobType,
-  userId: string
+  userId: string,
+  options?: MaintenanceJobData['options']
 ): Promise<string> {
   if (!maintenanceQueue) {
     throw new Error('Maintenance queue not initialized');
@@ -1578,6 +1595,7 @@ export async function enqueueMaintenanceJob(
     {
       type,
       userId,
+      options,
     },
     {
       jobId: newJobId,
@@ -1676,6 +1694,30 @@ export async function getMaintenanceJobHistory(limit: number = 10): Promise<
     finishedAt: job.finishedOn,
     result: job.returnvalue as MaintenanceJobResult | undefined,
   }));
+}
+
+/**
+ * Check if a specific maintenance job type is currently running or queued
+ */
+export async function isMaintenanceJobRunning(
+  jobType: MaintenanceJobType
+): Promise<{ isRunning: boolean; state: 'active' | 'waiting' | 'delayed' | null }> {
+  if (!maintenanceQueue) {
+    return { isRunning: false, state: null };
+  }
+
+  const jobs = await maintenanceQueue.getJobs(['active', 'waiting', 'delayed']);
+  const matchingJob = jobs.find((job) => job.data.type === jobType);
+
+  if (!matchingJob) {
+    return { isRunning: false, state: null };
+  }
+
+  const state = await matchingJob.getState();
+  return {
+    isRunning: true,
+    state: state as 'active' | 'waiting' | 'delayed',
+  };
 }
 
 /**

@@ -5,9 +5,9 @@ import { StatCard, formatNumber } from '@/components/ui/stat-card';
 import { LibraryStatsSkeleton } from '@/components/ui/skeleton';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ErrorState, EmptyState } from '@/components/library';
+import { ErrorState, LibraryEmptyState } from '@/components/library';
 import { LibraryGrowthChart } from '@/components/charts';
-import { useLibraryStats, useLibraryGrowth } from '@/hooks/queries';
+import { useLibraryStats, useLibraryGrowth, useLibraryStatus } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
 
@@ -46,6 +46,7 @@ function formatLastUpdated(dateStr: string | null | undefined): string {
 export function LibraryOverview() {
   const { selectedServerId } = useServer();
   const { value: timeRange, setValue: setTimeRange } = useTimeRange();
+  const status = useLibraryStatus(selectedServerId);
   const { data: stats, isLoading, isError, error, refetch } = useLibraryStats(selectedServerId);
 
   // Map TimeRangePicker periods to API format
@@ -137,8 +138,11 @@ export function LibraryOverview() {
     );
   }
 
-  // Show empty state if library not synced (no asOf date)
-  if (!stats?.asOf) {
+  // Show empty state if library not synced or needs backfill
+  const needsSetup =
+    !status.isLoading &&
+    (!status.data?.isSynced || status.data?.needsBackfill || status.data?.isBackfillRunning);
+  if (needsSetup) {
     return (
       <div className="space-y-6">
         {/* Header with time range picker */}
@@ -149,11 +153,7 @@ export function LibraryOverview() {
           </div>
           <TimeRangePicker value={timeRange} onChange={setTimeRange} />
         </div>
-        <EmptyState
-          icon={Database}
-          title="Library not synced yet"
-          description="Library statistics will appear here once the library has been synced. This typically happens automatically within 24 hours."
-        />
+        <LibraryEmptyState onComplete={refetch} />
       </div>
     );
   }
@@ -171,7 +171,7 @@ export function LibraryOverview() {
           <p className="text-muted-foreground text-sm">Library health and growth metrics</p>
           <div className="text-muted-foreground mt-1 flex items-center gap-1 text-xs">
             <Calendar className="h-3 w-3" />
-            <span>Last updated: {formatLastUpdated(stats.asOf)}</span>
+            <span>Last updated: {formatLastUpdated(stats?.asOf)}</span>
           </div>
         </div>
         <TimeRangePicker value={timeRange} onChange={setTimeRange} />
@@ -182,17 +182,17 @@ export function LibraryOverview() {
         <StatCard
           icon={Database}
           label="Total Items"
-          value={formatNumber(stats.totalItems ?? 0)}
+          value={formatNumber(stats?.totalItems ?? 0)}
           subValue={periodChangeLabel}
           isLoading={growth.isLoading}
         />
-        <StatCard icon={HardDrive} label="Total Size" value={formatBytes(stats.totalSizeBytes)} />
-        <StatCard icon={Film} label="Movies" value={formatNumber(stats.movieCount ?? 0)} />
+        <StatCard icon={HardDrive} label="Total Size" value={formatBytes(stats?.totalSizeBytes)} />
+        <StatCard icon={Film} label="Movies" value={formatNumber(stats?.movieCount ?? 0)} />
         <StatCard
           icon={Tv}
           label="Episodes"
-          value={formatNumber(stats.episodeCount ?? 0)}
-          subValue={stats.showCount ? `${formatNumber(stats.showCount)} shows` : undefined}
+          value={formatNumber(stats?.episodeCount ?? 0)}
+          subValue={stats?.showCount ? `${formatNumber(stats.showCount)} shows` : undefined}
         />
         <StatCard
           icon={TrendingUp}

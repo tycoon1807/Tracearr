@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   AlertTriangle,
   Trash2,
@@ -17,16 +17,16 @@ import {
   Library,
   Link2,
   Camera,
-  HardDrive,
   Loader2,
 } from 'lucide-react';
+import type { ColumnDef } from '@tanstack/react-table';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { DataTable } from '@/components/ui/data-table';
 import {
   Dialog,
   DialogContent,
@@ -39,7 +39,7 @@ import { useVersion } from '@/hooks/queries';
 import { tokenStorage, api } from '@/lib/api';
 import { API_BASE_PATH } from '@tracearr/shared';
 import { toast } from 'sonner';
-import { formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 interface DebugStats {
@@ -290,13 +290,105 @@ export function Debug() {
     });
   };
 
-  const toggleAllSnapshots = () => {
+  const _toggleAllSnapshots = () => {
     if (selectedSnapshots.size === snapshots.length) {
       setSelectedSnapshots(new Set());
     } else {
       setSelectedSnapshots(new Set(snapshots.map((s) => s.id)));
     }
   };
+
+  const handlePageSelect = (rows: SnapshotItem[]) => {
+    const pageIds = new Set(rows.map((r) => r.id));
+    const allSelected = rows.every((r) => selectedSnapshots.has(r.id));
+    if (allSelected) {
+      setSelectedSnapshots((prev) => {
+        const next = new Set(prev);
+        pageIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedSnapshots((prev) => new Set([...prev, ...pageIds]));
+    }
+  };
+
+  const snapshotColumns: ColumnDef<SnapshotItem>[] = useMemo(
+    () => [
+      {
+        accessorKey: 'snapshot_time',
+        header: 'Date',
+        cell: ({ row }) => {
+          const date = new Date(row.original.snapshot_time);
+          return (
+            <div className="text-xs">
+              <div>{format(date, 'MMM d, yyyy')}</div>
+              <div className="text-muted-foreground">
+                {formatDistanceToNow(date, { addSuffix: true })}
+              </div>
+            </div>
+          );
+        },
+        sortingFn: 'datetime',
+      },
+      {
+        accessorKey: 'server_name',
+        header: 'Server',
+        cell: ({ row }) => <span className="text-xs">{row.original.server_name || 'Unknown'}</span>,
+      },
+      {
+        accessorKey: 'library_type',
+        header: 'Library',
+        cell: ({ row }) => (
+          <Badge variant="secondary" className="text-xs font-normal">
+            {row.original.library_type}
+          </Badge>
+        ),
+      },
+      {
+        accessorKey: 'is_suspicious',
+        header: 'Status',
+        cell: ({ row }) =>
+          row.original.is_suspicious ? (
+            <Badge variant="outline" className="border-amber-500/30 text-xs text-amber-600">
+              Suspicious
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground text-xs">OK</span>
+          ),
+      },
+      {
+        accessorKey: 'item_count',
+        header: 'Items',
+        cell: ({ row }) => (
+          <span className="text-xs">{row.original.item_count.toLocaleString()}</span>
+        ),
+      },
+      {
+        accessorKey: 'total_size',
+        header: 'Size',
+        cell: ({ row }) => <span className="text-xs">{formatBytes(row.original.total_size)}</span>,
+        sortingFn: (rowA, rowB) => {
+          const a = parseInt(String(rowA.original.total_size), 10) || 0;
+          const b = parseInt(String(rowB.original.total_size), 10) || 0;
+          return a - b;
+        },
+      },
+      {
+        id: 'content',
+        header: 'Content',
+        cell: ({ row }) => {
+          const { movie_count, episode_count, music_count } = row.original;
+          const parts: string[] = [];
+          if (movie_count > 0) parts.push(`${movie_count} movies`);
+          if (episode_count > 0) parts.push(`${episode_count} episodes`);
+          if (music_count > 0) parts.push(`${music_count} tracks`);
+          return <span className="text-muted-foreground text-xs">{parts.join(', ') || '—'}</span>;
+        },
+        enableSorting: false,
+      },
+    ],
+    []
+  );
 
   return (
     <div className="space-y-6">
@@ -640,7 +732,7 @@ export function Debug() {
         <TabsContent value="snapshots" className="space-y-6">
           {/* Snapshot Management */}
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2">
@@ -687,27 +779,15 @@ export function Debug() {
                       : 'Click "Load" to view snapshots'}
                   </p>
                 </div>
-              ) : isLoadingSnapshots ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
-                </div>
               ) : (
                 <div className="space-y-3">
                   {/* Actions bar */}
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        checked={
-                          selectedSnapshots.size === snapshots.length && snapshots.length > 0
-                        }
-                        onCheckedChange={toggleAllSnapshots}
-                      />
-                      <span className="text-muted-foreground text-sm">
-                        {selectedSnapshots.size > 0
-                          ? `${selectedSnapshots.size} selected`
-                          : `${snapshots.length} snapshot(s)`}
-                      </span>
-                    </div>
+                    <span className="text-muted-foreground text-sm">
+                      {selectedSnapshots.size > 0
+                        ? `${selectedSnapshots.size} of ${snapshots.length} selected`
+                        : `${snapshots.length} snapshot(s)`}
+                    </span>
                     <div className="flex gap-2">
                       {selectedSnapshots.size > 0 && (
                         <Button
@@ -744,76 +824,30 @@ export function Debug() {
                     </div>
                   </div>
 
-                  {/* Snapshot list */}
-                  <div className="space-y-2">
-                    {snapshots.map((snapshot) => (
-                      <div
-                        key={snapshot.id}
-                        className={cn(
-                          'flex items-center gap-3 rounded-lg border p-3',
-                          snapshot.is_suspicious && 'border-amber-500/30 bg-amber-500/5',
-                          selectedSnapshots.has(snapshot.id) && 'ring-primary/30 ring-2'
-                        )}
-                      >
-                        <Checkbox
-                          checked={selectedSnapshots.has(snapshot.id)}
-                          onCheckedChange={() => toggleSnapshotSelection(snapshot.id)}
-                        />
-
-                        <div
-                          className={cn(
-                            'flex h-8 w-8 shrink-0 items-center justify-center rounded-md',
-                            snapshot.is_suspicious ? 'bg-amber-500/10' : 'bg-muted'
-                          )}
-                        >
-                          {snapshot.is_suspicious ? (
-                            <AlertTriangle className="h-4 w-4 text-amber-600" />
-                          ) : (
-                            <HardDrive className="text-muted-foreground h-4 w-4" />
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate text-sm font-medium">
-                              {snapshot.library_type}
-                            </span>
-                            <Badge variant="secondary" className="text-xs">
-                              {snapshot.server_name || 'Unknown Server'}
-                            </Badge>
-                            {snapshot.is_suspicious && (
-                              <Badge
-                                variant="outline"
-                                className="border-amber-500/30 text-amber-600"
-                              >
-                                Suspicious
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="text-muted-foreground mt-0.5 flex flex-wrap gap-x-3 text-xs">
-                            <span>{snapshot.item_count.toLocaleString()} items</span>
-                            <span>{formatBytes(snapshot.total_size)}</span>
-                            {snapshot.movie_count > 0 && <span>{snapshot.movie_count} movies</span>}
-                            {snapshot.episode_count > 0 && (
-                              <span>{snapshot.episode_count} episodes</span>
-                            )}
-                            {snapshot.music_count > 0 && <span>{snapshot.music_count} tracks</span>}
-                          </div>
-                        </div>
-
-                        <div className="shrink-0 text-right">
-                          <p className="text-muted-foreground text-xs">
-                            {formatDistanceToNow(new Date(snapshot.snapshot_time), {
-                              addSuffix: true,
-                            })}
-                          </p>
-                          <p className="text-muted-foreground text-xs">
-                            {new Date(snapshot.snapshot_time).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  {/* Snapshot table */}
+                  <DataTable
+                    columns={snapshotColumns}
+                    data={snapshots}
+                    pageSize={50}
+                    compact
+                    isLoading={isLoadingSnapshots}
+                    emptyMessage={
+                      showSuspiciousOnly
+                        ? 'No suspicious snapshots found'
+                        : 'Click "Load" to view snapshots'
+                    }
+                    selectable
+                    getRowId={(row) => row.id}
+                    selectedIds={selectedSnapshots}
+                    onRowSelect={(row) => toggleSnapshotSelection(row.id)}
+                    onPageSelect={handlePageSelect}
+                    isPageSelected={
+                      snapshots.length > 0 && snapshots.every((s) => selectedSnapshots.has(s.id))
+                    }
+                    isPageIndeterminate={
+                      selectedSnapshots.size > 0 && selectedSnapshots.size < snapshots.length
+                    }
+                  />
                 </div>
               )}
             </CardContent>

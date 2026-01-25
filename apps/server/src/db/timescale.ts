@@ -1480,17 +1480,29 @@ async function ensureEngagementViews(): Promise<void> {
   `);
 }
 
+/** Options for rebuildTimescaleViews */
+export interface RebuildTimescaleViewsOptions {
+  /** If true, refresh all historical data after rebuild (can take minutes/hours) */
+  fullRefresh?: boolean;
+  /** Optional callback for progress updates */
+  progressCallback?: (step: number, total: number, message: string) => void;
+}
+
 /**
  * Rebuild TimescaleDB views and continuous aggregates
  *
  * Drops and recreates all continuous aggregates.
  * Called automatically when schema version changes, or manually to recover from broken views.
  *
- * @param progressCallback - Optional callback for progress updates
+ * @param options - Rebuild options including fullRefresh and progressCallback
  */
 export async function rebuildTimescaleViews(
-  progressCallback?: (step: number, total: number, message: string) => void
+  options?: RebuildTimescaleViewsOptions | ((step: number, total: number, message: string) => void)
 ): Promise<{ success: boolean; message: string }> {
+  // Handle legacy signature (just progressCallback) for backwards compatibility
+  const opts: RebuildTimescaleViewsOptions =
+    typeof options === 'function' ? { progressCallback: options } : (options ?? {});
+  const { fullRefresh = false, progressCallback } = opts;
   const hasExtension = await isTimescaleInstalled();
   if (!hasExtension) {
     return {
@@ -1499,7 +1511,7 @@ export async function rebuildTimescaleViews(
     };
   }
 
-  const totalSteps = 10;
+  const totalSteps = fullRefresh ? 11 : 10;
   const report = (step: number, msg: string) => {
     progressCallback?.(step, totalSteps, msg);
   };
@@ -1534,14 +1546,22 @@ export async function rebuildTimescaleViews(
     report(5, 'Creating engagement views...');
     await ensureEngagementViews();
 
-    // Step 10: Skip full historical refresh - it can take minutes/hours with large datasets
-    // The scheduled refresh policies will catch up over time (every 5 minutes)
-    // This is safe because continuous aggregates are for dashboard analytics, not critical data
-    report(10, 'Skipping historical refresh - policies will catch up automatically');
+    // Step 10: Optionally refresh historical data
+    if (fullRefresh) {
+      report(10, 'Refreshing historical data (this may take a while)...');
+      await refreshAggregates({ fullRefresh: true });
+      report(11, 'Historical data refresh complete');
+    } else {
+      // Skip full historical refresh - it can take minutes/hours with large datasets
+      // The scheduled refresh policies will catch up over time (every 5 minutes)
+      report(10, 'Skipping historical refresh - policies will catch up automatically');
+    }
 
     return {
       success: true,
-      message: 'Successfully rebuilt all TimescaleDB views',
+      message: fullRefresh
+        ? 'Successfully rebuilt all TimescaleDB views with full data refresh'
+        : 'Successfully rebuilt all TimescaleDB views',
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

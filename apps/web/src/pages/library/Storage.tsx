@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
   ErrorState,
-  EmptyState,
+  LibraryEmptyState,
   DuplicatesTable,
   StaleContentTabs,
   RoiTable,
@@ -19,6 +19,7 @@ import {
   useLibraryDuplicates,
   useLibraryStale,
   useLibraryRoi,
+  useLibraryStatus,
 } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
@@ -47,6 +48,9 @@ function formatBytes(bytesStr: string | number | null | undefined, decimals = 1)
 export function LibraryStorage() {
   const { selectedServerId, servers } = useServer();
   const { value: timeRange, setValue: setTimeRange } = useTimeRange();
+
+  // Check library status first
+  const status = useLibraryStatus(selectedServerId);
 
   // Pagination state for tables
   const [duplicatesPage, setDuplicatesPage] = useState(1);
@@ -124,16 +128,15 @@ export function LibraryStorage() {
     );
   }
 
-  // Show empty state if no storage data
-  if (!storage.isLoading && (!storage.data?.history || storage.data.history.length === 0)) {
+  // Show empty state if library not synced or needs backfill
+  const needsSetup =
+    !status.isLoading &&
+    (!status.data?.isSynced || status.data?.needsBackfill || status.data?.isBackfillRunning);
+  if (needsSetup) {
     return (
       <div className="space-y-6">
         {header}
-        <EmptyState
-          icon={HardDrive}
-          title="No storage data yet"
-          description="Storage metrics will appear here once library snapshots have been collected. This typically happens automatically within 24 hours."
-        />
+        <LibraryEmptyState onComplete={storage.refetch} />
       </div>
     );
   }

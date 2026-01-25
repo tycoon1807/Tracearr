@@ -1102,6 +1102,22 @@ class ApiClient {
       if (libraryId) params.set('libraryId', libraryId);
       return this.request<LibraryResolutionResponse>(`/library/resolution?${params.toString()}`);
     },
+    status: (serverId?: string) => {
+      const params = new URLSearchParams();
+      if (serverId) params.set('serverId', serverId);
+      return this.request<{
+        isSynced: boolean;
+        isSyncRunning: boolean;
+        needsBackfill: boolean;
+        isBackfillRunning: boolean;
+        backfillState: 'active' | 'waiting' | 'delayed' | null;
+        itemCount: number;
+        snapshotCount: number;
+        earliestItemDate: string | null;
+        earliestSnapshotDate: string | null;
+        backfillDays: number | null;
+      }>(`/library/status?${params.toString()}`);
+    },
   };
 
   // Settings
@@ -1125,6 +1141,8 @@ class ApiClient {
     getApiKey: () => this.request<{ token: string | null }>('/settings/api-key'),
     regenerateApiKey: () =>
       this.request<{ token: string }>('/settings/api-key/regenerate', { method: 'POST' }),
+    getIpWarning: () =>
+      this.request<{ showWarning: boolean; stateHash: string }>('/settings/ip-warning'),
   };
 
   // Channel Routing
@@ -1260,14 +1278,21 @@ class ApiClient {
           type: string;
           name: string;
           description: string;
+          options?: Array<{
+            name: string;
+            label: string;
+            description: string;
+            type: 'boolean';
+            default: boolean;
+          }>;
         }>;
       }>('/maintenance/jobs'),
-    startJob: (type: string) =>
+    startJob: (type: string, options?: { fullRefresh?: boolean }) =>
       this.request<{ status: string; jobId: string; message: string }>(
         `/maintenance/jobs/${type}`,
         {
           method: 'POST',
-          body: '{}',
+          body: JSON.stringify(options ?? {}),
         }
       ),
     getProgress: () =>
