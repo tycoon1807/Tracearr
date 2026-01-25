@@ -23,6 +23,7 @@ import { sessions, serverUsers } from '../db/schema.js';
 import { normalizeClient, normalizePlatformName } from '../utils/platformNormalizer.js';
 import { getPubSubService } from '../services/cache.js';
 import { rebuildTimescaleViews } from '../db/timescale.js';
+import { INVALID_SNAPSHOT_CONDITION } from '../utils/snapshotValidation.js';
 import countries from 'i18n-iso-countries';
 import countriesEn from 'i18n-iso-countries/langs/en.json' with { type: 'json' };
 
@@ -729,6 +730,7 @@ async function processFixImportedProgressJob(
           progressMs: sessions.progressMs,
           totalDurationMs: sessions.totalDurationMs,
           watched: sessions.watched,
+          mediaType: sessions.mediaType,
         })
         .from(sessions)
         .where(lastId ? and(whereCondition, sql`${sessions.id} > ${lastId}`) : whereCondition)
@@ -768,10 +770,18 @@ async function processFixImportedProgressJob(
             totalDurationMs = Math.round(durationMs / 0.85);
             progressMs = durationMs;
           } else {
-            // Without percent_complete, we can't calculate total duration
-            // Skip these - better to show "unknown" than incorrect 100%
-            totalSkipped++;
-            continue;
+            // For unwatched sessions, use median content duration based on media type
+            // These medians are derived from actual session data in the database
+            const medianDurations: Record<string, number> = {
+              episode: 42 * 60 * 1000, // 42 minutes
+              movie: 109 * 60 * 1000, // 109 minutes
+              track: 4 * 60 * 1000, // 4 minutes
+            };
+            const medianDuration = medianDurations[session.mediaType ?? ''] ?? 60 * 60 * 1000; // default 1 hour
+
+            // Use the larger of median or actual watch time (they may have watched longer than average)
+            totalDurationMs = Math.max(medianDuration, durationMs);
+            progressMs = durationMs;
           }
 
           // Check if update is actually needed
@@ -1498,17 +1508,15 @@ async function processBackfillLibrarySnapshotsJob(
     }
 
     // Clean up empty snapshots (from bad dates like 1969/1970 or gaps before real data)
+    // Note: We only delete snapshots with no items in any category.
+    // Snapshots with items but total_size=0 are kept (items may lack file_size metadata).
+    // See snapshotValidation.ts for the centralized definition of invalid snapshots.
     activeJobProgress.message = 'Cleaning up empty snapshots...';
     await publishProgress();
 
     const cleanupResult = await db.execute(sql`
       DELETE FROM library_snapshots
-      WHERE (item_count = 0
-        AND movie_count = 0
-        AND episode_count = 0
-        AND show_count = 0
-        AND music_count = 0)
-        OR total_size = 0
+      WHERE ${INVALID_SNAPSHOT_CONDITION}
     `);
     const cleanedUp = Number(cleanupResult.rowCount ?? 0);
     if (cleanedUp > 0) {

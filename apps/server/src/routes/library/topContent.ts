@@ -71,7 +71,8 @@ function getPeriodDates(period: string): { startDate: Date; endDate: Date } {
       break;
     case 'all':
     default:
-      startDate = new Date(0); // Beginning of time
+      // Cap "all" to 3 years to prevent unbounded queries that exhaust resources
+      startDate = new Date(endDate.getTime() - 3 * 365 * 24 * 60 * 60 * 1000);
       break;
   }
 

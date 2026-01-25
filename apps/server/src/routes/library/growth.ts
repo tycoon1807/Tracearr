@@ -3,8 +3,8 @@
  *
  * GET /growth - Time-series library growth data points
  *
- * Uses library_items.created_at (Plex's addedAt) for accurate growth tracking
- * based on when items were actually added to the media server.
+ * Uses pre-computed library_snapshots for efficient growth tracking.
+ * Snapshots are created daily by the maintenance job.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -37,8 +37,9 @@ interface LibraryGrowthResponse {
 
 /**
  * Calculate start date based on period string.
+ * Returns null for 'all' which gets capped to 3 years.
  */
-function getStartDate(period: '7d' | '30d' | '90d' | '1y' | 'all'): Date | null {
+function getStartDate(period: '7d' | '30d' | '90d' | '1y' | 'all'): Date {
   const now = new Date();
   switch (period) {
     case '7d':
@@ -50,7 +51,8 @@ function getStartDate(period: '7d' | '30d' | '90d' | '1y' | 'all'): Date | null 
     case '1y':
       return new Date(now.getTime() - 365 * TIME_MS.DAY);
     case 'all':
-      return null;
+      // Cap "all" to 3 years to prevent unbounded queries
+      return new Date(now.getTime() - 3 * 365 * TIME_MS.DAY);
   }
 }
 
@@ -58,10 +60,8 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
   /**
    * GET /growth - Library growth timeline
    *
-   * Returns time-series data showing items added per day based on
-   * library_items.created_at (Plex's addedAt timestamp).
-   *
-   * Note: Removals are set to 0 since we don't track deletion dates.
+   * Returns time-series data from pre-computed library_snapshots.
+   * Much more efficient than computing growth from library_items on the fly.
    */
   app.get<{ Querystring: LibraryGrowthQueryInput }>(
     '/growth',
@@ -100,160 +100,111 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
         }
       }
 
-      // Build server filter for library_items table
+      // Build server filter for snapshots table
       const serverFilter = serverId
-        ? sql`AND li.server_id = ${serverId}::uuid`
+        ? sql`AND ls.server_id = ${serverId}::uuid`
         : authUser.serverIds?.length
-          ? sql`AND li.server_id = ANY(${authUser.serverIds}::uuid[])`
+          ? sql`AND ls.server_id = ANY(${authUser.serverIds}::uuid[])`
           : sql``;
 
       // Optional library filter
-      const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
+      const libraryFilter = libraryId ? sql`AND ls.library_id = ${libraryId}` : sql``;
 
       // Calculate date range
       const startDate = getStartDate(period);
       const endDate = new Date();
 
-      // For 'all' period, find the earliest item date from the database
-      let effectiveStartDate: Date;
-      if (startDate) {
-        effectiveStartDate = startDate;
-      } else {
-        // Query for the earliest created_at date
-        const earliestResult = await db.execute(sql`
-          SELECT MIN(created_at)::date AS earliest
-          FROM library_items li
-          WHERE li.media_type IN ('movie', 'episode', 'track')
-            ${serverFilter}
-            ${libraryFilter}
-        `);
-        const earliest = (earliestResult.rows[0] as { earliest: string | null })?.earliest;
-        effectiveStartDate = earliest ? new Date(earliest) : new Date('2020-01-01');
-      }
-
-      // Query with continuous date series for each category
-      // This ensures we have data points for every day, even if nothing was added
+      // Query from library_snapshots - much more efficient than generate_series
+      // Snapshots are point-in-time markers - use MAX per library per day, then SUM across libraries
       const result = await db.execute(sql`
-        WITH date_series AS (
-          -- Generate all dates in the range
-          SELECT d::date AS day
-          FROM generate_series(
-            ${effectiveStartDate.toISOString()}::date,
-            ${endDate.toISOString()}::date,
-            '1 day'::interval
-          ) d
-        ),
-        categories AS (
-          -- The three media type categories we care about
-          SELECT unnest(ARRAY['movie', 'episode', 'track']) AS category
-        ),
-        date_category_grid AS (
-          -- Cross join to get all date+category combinations
-          SELECT ds.day, c.category
-          FROM date_series ds
-          CROSS JOIN categories c
-        ),
-        base_counts AS (
-          -- Count ALL items per category (total library size)
+        WITH library_daily AS (
+          -- Get MAX counts per library per day (handles multiple snapshots per day)
           SELECT
-            CASE
-              WHEN li.media_type = 'movie' THEN 'movie'
-              WHEN li.media_type = 'episode' THEN 'episode'
-              WHEN li.media_type = 'track' THEN 'track'
-            END AS category,
-            COUNT(*)::int AS total_items
-          FROM library_items li
-          WHERE li.media_type IN ('movie', 'episode', 'track')
+            DATE(ls.snapshot_time AT TIME ZONE ${tz}) AS day,
+            ls.server_id,
+            ls.library_id,
+            MAX(ls.movie_count) AS movies,
+            MAX(ls.episode_count) AS episodes,
+            MAX(ls.music_count) AS music
+          FROM library_snapshots ls
+          WHERE ls.snapshot_time >= ${startDate.toISOString()}::timestamptz
+            AND ls.snapshot_time <= ${endDate.toISOString()}::timestamptz
             ${serverFilter}
             ${libraryFilter}
-          GROUP BY 1
+          GROUP BY 1, ls.server_id, ls.library_id
         ),
-        items_before_period AS (
-          -- Count items added BEFORE the period (for calculating running total)
+        daily_totals AS (
+          -- Sum across all libraries for each day
           SELECT
-            CASE
-              WHEN li.media_type = 'movie' THEN 'movie'
-              WHEN li.media_type = 'episode' THEN 'episode'
-              WHEN li.media_type = 'track' THEN 'track'
-            END AS category,
-            COUNT(*)::int AS items_before
-          FROM library_items li
-          WHERE li.media_type IN ('movie', 'episode', 'track')
-            ${serverFilter}
-            ${libraryFilter}
-            AND li.created_at < ${effectiveStartDate.toISOString()}::timestamptz
-          GROUP BY 1
+            day,
+            SUM(movies)::int AS movies,
+            SUM(episodes)::int AS episodes,
+            SUM(music)::int AS music
+          FROM library_daily
+          GROUP BY day
         ),
-        daily_additions AS (
-          -- Count items added per day per category
+        with_additions AS (
+          -- Calculate additions as difference from previous day
           SELECT
-            DATE(li.created_at AT TIME ZONE ${tz}) AS day,
-            CASE
-              WHEN li.media_type = 'movie' THEN 'movie'
-              WHEN li.media_type = 'episode' THEN 'episode'
-              WHEN li.media_type = 'track' THEN 'track'
-            END AS category,
-            COUNT(*)::int AS additions
-          FROM library_items li
-          WHERE li.media_type IN ('movie', 'episode', 'track')
-            ${serverFilter}
-            ${libraryFilter}
-            AND li.created_at >= ${effectiveStartDate.toISOString()}::timestamptz
-          GROUP BY 1, 2
-        ),
-        filled_data AS (
-          -- Join grid with actual data, fill nulls with 0
-          SELECT
-            dcg.day,
-            dcg.category,
-            COALESCE(da.additions, 0) AS additions,
-            COALESCE(ibp.items_before, 0) AS items_before
-          FROM date_category_grid dcg
-          LEFT JOIN daily_additions da ON da.day = dcg.day AND da.category = dcg.category
-          LEFT JOIN items_before_period ibp ON ibp.category = dcg.category
+            day,
+            movies,
+            episodes,
+            music,
+            GREATEST(0, movies - COALESCE(LAG(movies) OVER (ORDER BY day), movies))::int AS movie_adds,
+            GREATEST(0, episodes - COALESCE(LAG(episodes) OVER (ORDER BY day), episodes))::int AS episode_adds,
+            GREATEST(0, music - COALESCE(LAG(music) OVER (ORDER BY day), music))::int AS music_adds
+          FROM daily_totals
         )
         SELECT
-          fd.day::text,
-          fd.category,
-          fd.additions,
-          (fd.items_before + SUM(fd.additions) OVER (PARTITION BY fd.category ORDER BY fd.day))::int AS total
-        FROM filled_data fd
-        WHERE EXISTS (
-          -- Only include categories that have items
-          SELECT 1 FROM base_counts bc WHERE bc.category = fd.category
-        )
-        ORDER BY fd.day ASC, fd.category
+          day::text,
+          movies,
+          episodes,
+          music,
+          movie_adds,
+          episode_adds,
+          music_adds
+        FROM with_additions
+        ORDER BY day ASC
       `);
 
       const rows = result.rows as Array<{
         day: string;
-        category: string;
-        additions: number;
-        total: number;
+        movies: number;
+        episodes: number;
+        music: number;
+        movie_adds: number;
+        episode_adds: number;
+        music_adds: number;
       }>;
 
-      // Separate into movies, episodes, music arrays
+      // Build separate arrays for each media type
       const movies: GrowthDataPoint[] = [];
       const episodes: GrowthDataPoint[] = [];
       const music: GrowthDataPoint[] = [];
 
       for (const row of rows) {
-        const point: GrowthDataPoint = {
-          day: row.day,
-          total: row.total,
-          additions: row.additions,
-        };
+        if (row.movies > 0 || row.movie_adds > 0) {
+          movies.push({
+            day: row.day,
+            total: row.movies,
+            additions: row.movie_adds,
+          });
+        }
 
-        switch (row.category) {
-          case 'movie':
-            movies.push(point);
-            break;
-          case 'episode':
-            episodes.push(point);
-            break;
-          case 'track':
-            music.push(point);
-            break;
+        if (row.episodes > 0 || row.episode_adds > 0) {
+          episodes.push({
+            day: row.day,
+            total: row.episodes,
+            additions: row.episode_adds,
+          });
+        }
+
+        if (row.music > 0 || row.music_adds > 0) {
+          music.push({
+            day: row.day,
+            total: row.music,
+            additions: row.music_adds,
+          });
         }
       }
 

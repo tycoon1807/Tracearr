@@ -3,7 +3,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { sql } from 'drizzle-orm';
+import { sql, inArray } from 'drizzle-orm';
 import type { MaintenanceJobType } from '@tracearr/shared';
 import {
   enqueueMaintenanceJob,
@@ -13,6 +13,7 @@ import {
   getMaintenanceJobHistory,
 } from '../jobs/maintenanceQueue.js';
 import { db } from '../db/client.js';
+import { librarySnapshots } from '../db/schema.js';
 
 export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -325,12 +326,11 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         return reply.badRequest('Invalid snapshot ID format');
       }
 
-      const result = await db.execute(sql`
-        DELETE FROM library_snapshots
-        WHERE id = ANY(${ids}::uuid[])
-        RETURNING id
-      `);
-      deletedCount = result.rows.length;
+      const result = await db
+        .delete(librarySnapshots)
+        .where(inArray(librarySnapshots.id, ids))
+        .returning({ id: librarySnapshots.id });
+      deletedCount = result.length;
     } else if (criteria) {
       // Build delete query based on criteria
       if (criteria.suspicious) {

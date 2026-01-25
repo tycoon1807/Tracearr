@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import {
   ErrorState,
   LibraryEmptyState,
-  DuplicatesTable,
+  // DuplicatesTable, // Temporarily hidden
   StaleContentTabs,
   RoiTable,
 } from '@/components/library';
@@ -53,7 +53,7 @@ export function LibraryStorage() {
   const status = useLibraryStatus(selectedServerId);
 
   // Pagination state for tables
-  const [duplicatesPage, setDuplicatesPage] = useState(1);
+  const [duplicatesPage, _setDuplicatesPage] = useState(1);
   const [roiPage, setRoiPage] = useState(1);
 
   // Storage trend chart toggle
@@ -234,7 +234,7 @@ export function LibraryStorage() {
         </CardContent>
       </Card>
 
-      {/* Duplicates Section - only show when multiple servers exist */}
+      {/* Duplicates Section - temporarily hidden globally
       {hasMultipleServers && (
         <Card>
           <CardHeader>
@@ -251,6 +251,7 @@ export function LibraryStorage() {
           </CardContent>
         </Card>
       )}
+      */}
 
       {/* Stale Content Section */}
       <Card>

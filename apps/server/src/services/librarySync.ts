@@ -9,7 +9,7 @@
  * 5. Report progress via callback for real-time updates
  */
 
-import { eq, and, inArray, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql, gte, lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { servers, libraryItems, librarySnapshots } from '../db/schema.js';
 import { createMediaServerClient, type MediaLibraryItem } from './mediaServer/index.js';
@@ -424,7 +424,7 @@ export class LibrarySyncService {
       };
     }
 
-    // Create snapshot
+    // Create snapshot (may return null if data is invalid - e.g., no file sizes)
     const snapshot = await this.createSnapshot(serverId, libraryId, allItems);
 
     return {
@@ -434,7 +434,7 @@ export class LibrarySyncService {
       itemsProcessed: processedItems,
       itemsAdded: addedKeys.length,
       itemsRemoved: removedKeys.length,
-      snapshotId: snapshot.id,
+      snapshotId: snapshot?.id ?? null,
     };
   }
 
@@ -512,13 +512,19 @@ export class LibrarySyncService {
   }
 
   /**
-   * Create a snapshot record with aggregate statistics
+   * Create a snapshot record with aggregate statistics.
+   * Snapshots are only created if they would be valid (has items AND has storage size).
+   * See snapshotValidation.ts for validity criteria.
    */
   async createSnapshot(
     serverId: string,
     libraryId: string,
     items: MediaLibraryItem[]
-  ): Promise<{ id: string }> {
+  ): Promise<{ id: string } | null> {
+    // Don't create snapshots for empty libraries
+    if (items.length === 0) {
+      return null;
+    }
     // Calculate quality distribution
     let count4k = 0;
     let count1080p = 0;
@@ -586,7 +592,63 @@ export class LibrarySyncService {
       }
     }
 
-    // Insert snapshot
+    // Don't create snapshots with no storage size (invalid per snapshotValidation.ts)
+    if (totalSize === 0) {
+      return null;
+    }
+
+    // Check for existing snapshot today for this library
+    // Update it if exists (better data), otherwise insert new
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const [existing] = await db
+      .select({ id: librarySnapshots.id, itemCount: librarySnapshots.itemCount })
+      .from(librarySnapshots)
+      .where(
+        and(
+          eq(librarySnapshots.serverId, serverId),
+          eq(librarySnapshots.libraryId, libraryId),
+          gte(librarySnapshots.snapshotTime, today),
+          lt(librarySnapshots.snapshotTime, tomorrow)
+        )
+      )
+      .limit(1);
+
+    // Update existing snapshot if this one has more/better data, otherwise insert
+    if (existing && items.length >= existing.itemCount) {
+      await db
+        .update(librarySnapshots)
+        .set({
+          snapshotTime: new Date(),
+          itemCount: items.length,
+          totalSize,
+          movieCount,
+          episodeCount,
+          seasonCount,
+          showCount,
+          musicCount,
+          count4k,
+          count1080p,
+          count720p,
+          countSd,
+          hevcCount,
+          h264Count,
+          av1Count,
+          enrichmentPending: items.length,
+          enrichmentComplete: 0,
+        })
+        .where(eq(librarySnapshots.id, existing.id));
+      return { id: existing.id };
+    }
+
+    // No existing snapshot today, or existing has more items (don't overwrite with partial data)
+    if (existing) {
+      return { id: existing.id };
+    }
+
     const [snapshot] = await db
       .insert(librarySnapshots)
       .values({
