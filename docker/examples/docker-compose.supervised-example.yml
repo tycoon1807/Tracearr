@@ -1,6 +1,9 @@
-# Tracearr - All-in-One Deployment
+# Tracearr - All-in-One Deployment (Bare Metal Only)
 #
 # Single container with TimescaleDB, Redis, and Tracearr bundled together.
+# **Designed for Unraid and intended for bare metal hosts only.**
+# **NOT recommended for VMs or nested containers.**
+#
 # Secrets are auto-generated on first run — no configuration required.
 #
 # REQUIREMENTS:

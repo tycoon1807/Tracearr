@@ -85,7 +85,7 @@ Tracearr handles all three. One install, one interface.
 
 ## Quick Start
 
-The supervised image bundles TimescaleDB, Redis, and Tracearr in a single container. Requires 2GB+ RAM. Secrets are auto-generated on first run.
+The supervised image bundles TimescaleDB, Redis, and Tracearr in a single container. **Designed for Unraid and intended for bare metal hosts only** (not recommended for VMs or nested containers). Requires 2GB+ RAM. Secrets are auto-generated on first run.
 
 ```bash
 docker compose -f docker/examples/docker-compose.supervised-example.yml up -d
