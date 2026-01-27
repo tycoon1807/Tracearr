@@ -104,6 +104,7 @@ import {
 } from './jobs/inactivityCheckQueue.js';
 import { initPushRateLimiter } from './services/pushRateLimiter.js';
 import { processPushReceipts } from './services/pushNotification.js';
+import { cleanupMobileTokens } from './jobs/cleanupMobileTokens.js';
 import { db, runMigrations } from './db/client.js';
 import { initTimescaleDB, getTimescaleStatus } from './db/timescale.js';
 import { sql, eq } from 'drizzle-orm';
@@ -267,6 +268,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   app.log.info('Push notification rate limiter initialized');
 
   let pushReceiptInterval: ReturnType<typeof setInterval> | null = null;
+  let mobileTokenCleanupInterval: ReturnType<typeof setInterval> | null = null;
   try {
     initNotificationQueue(redisUrl);
     startNotificationWorker();
@@ -277,6 +279,15 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
         });
       },
       15 * 60 * 1000
+    );
+    // Cleanup expired/invalid mobile tokens every hour
+    mobileTokenCleanupInterval = setInterval(
+      () => {
+        cleanupMobileTokens().catch((err) => {
+          app.log.warn({ err }, 'Failed to cleanup mobile tokens');
+        });
+      },
+      60 * 60 * 1000 // 1 hour
     );
     app.log.info('Notification queue initialized');
   } catch (err) {
@@ -359,6 +370,9 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   app.addHook('onClose', async () => {
     if (pushReceiptInterval) {
       clearInterval(pushReceiptInterval);
+    }
+    if (mobileTokenCleanupInterval) {
+      clearInterval(mobileTokenCleanupInterval);
     }
     stopImageCacheCleanup();
     await pubSubRedis.quit();

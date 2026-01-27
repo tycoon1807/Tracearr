@@ -10,6 +10,8 @@ import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { getActiveAggregateNames } from '../db/timescale.js';
+import { clearStuckMaintenanceJobs } from '../jobs/maintenanceQueue.js';
 import {
   sessions,
   violations,
@@ -370,18 +372,48 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
    */
   app.post('/refresh-aggregates', async () => {
     try {
-      // Refresh all continuous aggregates
-      await db.execute(sql`
-        CALL refresh_continuous_aggregate('hourly_stats', NULL, NULL)
-      `);
-      await db.execute(sql`
-        CALL refresh_continuous_aggregate('daily_stats', NULL, NULL)
-      `);
-      return { success: true, message: 'Aggregates refreshed' };
+      // Refresh all active continuous aggregates with bounded time range
+      const endTime = new Date();
+      const startTime = new Date(endTime.getTime() - 7 * 24 * 60 * 60 * 1000); // Last 7 days
+
+      // Use the centralized aggregate list to stay in sync with timescale.ts
+      const aggregates = getActiveAggregateNames();
+
+      // Convert to ISO strings - CALL statements need explicit type hints
+      const startStr = startTime.toISOString();
+      const endStr = endTime.toISOString();
+
+      for (const agg of aggregates) {
+        try {
+          // Use parameterized query - agg::regclass validates it's a real relation
+          await db.execute(
+            sql`CALL refresh_continuous_aggregate(${agg}::regclass, ${startStr}::timestamptz, ${endStr}::timestamptz)`
+          );
+        } catch {
+          // Individual aggregate might not exist - continue with others
+        }
+      }
+
+      return { success: true, message: 'Aggregates refreshed (last 7 days)' };
     } catch {
       // Aggregates might not exist yet
       return { success: false, message: 'Aggregates not configured or refresh failed' };
     }
+  });
+
+  /**
+   * POST /debug/clear-stuck-jobs - Clear stuck maintenance jobs
+   *
+   * Use this to recover from a crash where jobs are left in active state.
+   */
+  app.post('/clear-stuck-jobs', async () => {
+    const result = await clearStuckMaintenanceJobs();
+    return {
+      success: true,
+      message:
+        result.cleared > 0 ? `Cleared ${result.cleared} stuck job(s)` : 'No stuck jobs found',
+      cleared: result.cleared,
+    };
   });
 
   /**

@@ -46,13 +46,14 @@ export async function hasHyperLogLog(): Promise<boolean> {
   }
   try {
     // Check both: extension installed AND aggregate has plays_hll column
+    // Note: Uses daily_content_engagement (active aggregate) instead of deprecated daily_stats_summary
     const result = await db.execute(sql`
       SELECT
         EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'timescaledb_toolkit') as extension_installed,
         EXISTS(
           SELECT 1
           FROM information_schema.columns
-          WHERE table_name = 'daily_stats_summary'
+          WHERE table_name = 'daily_content_engagement'
             AND column_name = 'plays_hll'
         ) as hll_column_exists
     `);

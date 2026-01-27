@@ -37,6 +37,10 @@ let librarySyncWorker: Worker<LibrarySyncJobData> | null = null;
 let redisClient: Redis | null = null;
 const activeSyncs = new Map<string, boolean>();
 
+// Backfill check cooldown - only check once per hour to avoid constant queries
+let lastBackfillCheck: number = 0;
+const BACKFILL_CHECK_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
 /**
  * Invalidate library-related caches after sync completes.
  * Uses pattern matching to clear all variants (per-server, per-library, with timezone, etc.)
@@ -220,9 +224,14 @@ export function startLibrarySyncWorker(): void {
     console.error('[LibrarySync] Worker error:', error);
   });
 
-  // After sync completes, check if snapshot backfill is needed
+  // After sync completes, check if snapshot backfill is needed (with cooldown)
+  // Only runs once per hour to avoid constant queries after every server sync
   librarySyncWorker.on('completed', () => {
-    void checkAndTriggerSnapshotBackfill();
+    const now = Date.now();
+    if (now - lastBackfillCheck > BACKFILL_CHECK_COOLDOWN_MS) {
+      lastBackfillCheck = now;
+      void checkAndTriggerSnapshotBackfill();
+    }
   });
 
   console.log('Library sync worker started');
@@ -301,7 +310,8 @@ async function checkAndTriggerSnapshotBackfill(): Promise<void> {
 }
 
 /**
- * Schedule daily auto-sync for all servers at 3 AM UTC
+ * Schedule auto-sync for all servers every 12 hours at :10 past the hour (UTC)
+ * Offset from :00 to avoid collision with aggregate auto-refresh
  */
 export async function scheduleAutoSync(): Promise<void> {
   if (!librarySyncQueue) {
@@ -332,7 +342,7 @@ export async function scheduleAutoSync(): Promise<void> {
       },
       {
         repeat: {
-          pattern: '0 * * * *', // Every hour
+          pattern: '10 */12 * * *', // Every 12 hours at :10 (offset from :00 to avoid collision)
           tz: 'UTC',
         },
         jobId: `scheduled-${server.id}`,
@@ -340,7 +350,9 @@ export async function scheduleAutoSync(): Promise<void> {
     );
   }
 
-  console.log(`[LibrarySync] Scheduled auto-sync for ${allServers.length} server(s) every hour`);
+  console.log(
+    `[LibrarySync] Scheduled auto-sync for ${allServers.length} server(s) every 12 hours`
+  );
 
   // Queue an immediate sync on boot (non-blocking, staggered to avoid overwhelming startup)
   // Check for any pending/delayed jobs first to avoid duplicates after rapid restarts

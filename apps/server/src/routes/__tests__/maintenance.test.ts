@@ -245,23 +245,21 @@ describe('Maintenance Routes', () => {
       );
     });
 
-    it('passes fullRefresh option for rebuild_timescale_views', async () => {
+    it('queues full_aggregate_rebuild job for safe historical refresh', async () => {
       app = await buildTestApp(ownerUser);
 
-      const jobId = 'job-full-refresh';
+      const jobId = 'job-full-aggregate-rebuild';
       vi.mocked(enqueueMaintenanceJob).mockResolvedValue(jobId);
 
       const response = await app.inject({
         method: 'POST',
-        url: '/maintenance/jobs/rebuild_timescale_views',
-        payload: { fullRefresh: true },
+        url: '/maintenance/jobs/full_aggregate_rebuild',
       });
 
       expect(response.statusCode).toBe(200);
       expect(enqueueMaintenanceJob).toHaveBeenCalledWith(
-        'rebuild_timescale_views',
-        ownerUser.userId,
-        { fullRefresh: true }
+        'full_aggregate_rebuild',
+        ownerUser.userId
       );
     });
 

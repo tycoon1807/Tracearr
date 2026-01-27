@@ -1263,7 +1263,8 @@ export type MaintenanceJobType =
   | 'normalize_codecs'
   | 'backfill_user_dates'
   | 'backfill_library_snapshots'
-  | 'cleanup_old_chunks';
+  | 'cleanup_old_chunks'
+  | 'full_aggregate_rebuild';
 
 export type MaintenanceJobStatus = 'idle' | 'running' | 'complete' | 'error';
 

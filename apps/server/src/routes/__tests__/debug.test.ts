@@ -535,10 +535,10 @@ describe('Debug Routes', () => {
       expect(response.statusCode).toBe(200);
       const body = response.json();
       expect(body.success).toBe(true);
-      expect(body.message).toBe('Aggregates refreshed');
+      expect(body.message).toBe('Aggregates refreshed (last 7 days)');
 
-      // Should call execute twice (hourly_stats and daily_stats)
-      expect(db.execute).toHaveBeenCalledTimes(2);
+      // Should call execute for each of the 4 active aggregates
+      expect(db.execute).toHaveBeenCalledTimes(4);
     });
 
     it('handles aggregate refresh failure gracefully', async () => {

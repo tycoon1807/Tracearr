@@ -86,17 +86,15 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
           description:
             'Recreates all TimescaleDB continuous aggregates and engagement views. ' +
             'Run this after upgrading if you see database errors about missing views or columns.',
-          options: [
-            {
-              name: 'fullRefresh',
-              label: 'Include Full Historical Refresh',
-              description:
-                'Also refresh all historical data for continuous aggregates. ' +
-                'Enable this if Watch Analytics shows incorrect counts. May take several minutes for large libraries.',
-              type: 'boolean',
-              default: false,
-            },
-          ],
+        },
+        {
+          type: 'full_aggregate_rebuild',
+          category: 'cleanup',
+          name: 'Full Historical Aggregate Rebuild',
+          description:
+            'Safely refreshes all continuous aggregates from the beginning of history. ' +
+            'Uses batched processing (30-day chunks) to prevent memory and file descriptor exhaustion. ' +
+            'Run this if Watch Analytics shows incorrect counts for historical data.',
         },
         {
           type: 'cleanup_old_chunks',
@@ -112,11 +110,8 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * POST /maintenance/jobs/:type - Start a maintenance job
-   *
-   * Body (optional):
-   * - fullRefresh: boolean - For rebuild_timescale_views, also refresh all historical data
    */
-  app.post<{ Params: { type: string }; Body: { fullRefresh?: boolean } }>(
+  app.post<{ Params: { type: string } }>(
     '/jobs/:type',
     { preHandler: [app.authenticate] },
     async (request, reply) => {
@@ -126,7 +121,6 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const { type } = request.params;
-      const { fullRefresh } = request.body || {};
 
       // Validate job type
       const validTypes: MaintenanceJobType[] = [
@@ -134,6 +128,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         'normalize_countries',
         'fix_imported_progress',
         'rebuild_timescale_views',
+        'full_aggregate_rebuild',
         'normalize_codecs',
         'backfill_user_dates',
         'backfill_library_snapshots',
@@ -143,16 +138,8 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         return reply.badRequest(`Invalid job type: ${type}`);
       }
 
-      // Build options for specific job types
-      const options =
-        type === 'rebuild_timescale_views' && fullRefresh ? { fullRefresh: true } : undefined;
-
       try {
-        const jobId = await enqueueMaintenanceJob(
-          type as MaintenanceJobType,
-          authUser.userId,
-          options
-        );
+        const jobId = await enqueueMaintenanceJob(type as MaintenanceJobType, authUser.userId);
         return {
           status: 'queued',
           jobId,

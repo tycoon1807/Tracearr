@@ -22,7 +22,11 @@ import { db } from '../db/client.js';
 import { sessions, serverUsers } from '../db/schema.js';
 import { normalizeClient, normalizePlatformName } from '../utils/platformNormalizer.js';
 import { getPubSubService } from '../services/cache.js';
-import { rebuildTimescaleViews } from '../db/timescale.js';
+import {
+  rebuildTimescaleViews,
+  safeFullRefreshAllAggregates,
+  type AggregateRefreshProgress,
+} from '../db/timescale.js';
 import {
   INVALID_SNAPSHOT_CONDITION,
   VALID_LIBRARY_ITEM_CONDITION,
@@ -100,6 +104,34 @@ export function startMaintenanceWorker(): void {
   if (maintenanceWorker) {
     console.log('Maintenance worker already running');
     return;
+  }
+
+  // Clear any stuck jobs from a previous crash before starting the worker
+  // If the server restarted, any "active" job is orphaned (worker died)
+  if (maintenanceQueue) {
+    maintenanceQueue
+      .getJobs(['active'])
+      .then(async (stuckJobs) => {
+        if (stuckJobs.length > 0) {
+          console.log(
+            `[Maintenance] Found ${stuckJobs.length} stuck job(s) from previous run, clearing...`
+          );
+          for (const job of stuckJobs) {
+            try {
+              await job.moveToFailed(
+                new Error('Server restarted while job was running'),
+                'server-restart'
+              );
+              console.log(`[Maintenance] Moved stuck job ${job.id} to failed state`);
+            } catch {
+              // Job might have already been handled
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[Maintenance] Failed to check for stuck jobs:', err);
+      });
   }
 
   maintenanceWorker = new Worker<MaintenanceJobData>(
@@ -182,6 +214,8 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<Main
       return processBackfillLibrarySnapshotsJob(job);
     case 'cleanup_old_chunks':
       return processCleanupOldChunksJob(job);
+    case 'full_aggregate_rebuild':
+      return processFullAggregateRebuildJob(job);
     default:
       throw new Error(`Unknown maintenance job type: ${job.data.type}`);
   }
@@ -1867,6 +1901,95 @@ async function processCleanupOldChunksJob(
 }
 
 /**
+ * Safely rebuild all aggregates using batched processing.
+ *
+ * This is the safe alternative to fullRefresh: true for full history rebuilds.
+ * Features:
+ * - Processes one aggregate at a time
+ * - Each aggregate is processed in 30-day batches
+ * - 2-second delay between batches prevents lock exhaustion
+ * - Progress tracking via WebSocket
+ */
+async function processFullAggregateRebuildJob(
+  job: Job<MaintenanceJobData>
+): Promise<MaintenanceJobResult> {
+  const startTime = Date.now();
+  const pubSubService = getPubSubService();
+
+  // Initialize progress
+  activeJobProgress = {
+    type: 'full_aggregate_rebuild',
+    status: 'running',
+    totalRecords: 0,
+    processedRecords: 0,
+    updatedRecords: 0,
+    skippedRecords: 0,
+    errorRecords: 0,
+    message: 'Starting aggregate rebuild...',
+    startedAt: new Date().toISOString(),
+  };
+
+  const publishProgress = async () => {
+    if (activeJobProgress && pubSubService) {
+      await pubSubService.publish(WS_EVENTS.MAINTENANCE_PROGRESS, activeJobProgress);
+    }
+  };
+
+  try {
+    await publishProgress();
+
+    await safeFullRefreshAllAggregates({
+      batchDays: 30,
+      delayBetweenBatches: 2000, // 2 second delay to prevent lock exhaustion
+      onProgress: (progress: AggregateRefreshProgress) => {
+        if (activeJobProgress) {
+          activeJobProgress.totalRecords = progress.totalAggregates;
+          activeJobProgress.processedRecords = progress.currentAggregateIndex;
+          activeJobProgress.message = `Rebuilding ${progress.aggregate}: ${progress.percentComplete}%`;
+          void publishProgress();
+        }
+        // Also update job progress for BullMQ UI
+        void job.updateProgress(progress.percentComplete);
+      },
+    });
+
+    const durationMs = Date.now() - startTime;
+
+    // Capture final counts before clearing progress
+    const finalProcessed = activeJobProgress?.totalRecords ?? 4;
+
+    // Update progress to complete
+    if (activeJobProgress) {
+      activeJobProgress.status = 'complete';
+      activeJobProgress.message = 'Aggregate rebuild complete';
+      activeJobProgress.completedAt = new Date().toISOString();
+    }
+    await publishProgress();
+
+    activeJobProgress = null;
+
+    return {
+      success: true,
+      type: 'full_aggregate_rebuild',
+      processed: finalProcessed,
+      updated: finalProcessed,
+      skipped: 0,
+      errors: 0,
+      durationMs,
+      message: 'Successfully rebuilt all aggregates',
+    };
+  } catch (error) {
+    if (activeJobProgress) {
+      activeJobProgress.status = 'error';
+      activeJobProgress.message = error instanceof Error ? error.message : 'Unknown error';
+      await publishProgress();
+      activeJobProgress = null;
+    }
+    throw error;
+  }
+}
+
+/**
  * Get current job progress (if any)
  */
 export function getMaintenanceProgress(): MaintenanceJobProgress | null {
@@ -1944,6 +2067,51 @@ export async function getMaintenanceJobStatus(jobId: string): Promise<{
     createdAt: job.timestamp,
     finishedAt: job.finishedOn,
   };
+}
+
+/**
+ * Clear all stuck/active maintenance jobs.
+ * Use this to recover from a crash where jobs are left in active state.
+ */
+export async function clearStuckMaintenanceJobs(): Promise<{ cleared: number }> {
+  if (!maintenanceQueue) {
+    return { cleared: 0 };
+  }
+
+  let cleared = 0;
+
+  // Handle active jobs - must move to failed first (can't remove active jobs directly)
+  const activeJobs = await maintenanceQueue.getJobs(['active']);
+  for (const job of activeJobs) {
+    try {
+      await job.moveToFailed(new Error('Manually cleared by admin'), 'manual-clear');
+      cleared++;
+    } catch {
+      // Try remove as fallback
+      try {
+        await job.remove();
+        cleared++;
+      } catch {
+        // Job might have already been handled
+      }
+    }
+  }
+
+  // Handle waiting/delayed jobs - can remove directly
+  const pendingJobs = await maintenanceQueue.getJobs(['waiting', 'delayed']);
+  for (const job of pendingJobs) {
+    try {
+      await job.remove();
+      cleared++;
+    } catch {
+      // Job might have already been removed
+    }
+  }
+
+  // Also clear in-memory progress
+  activeJobProgress = null;
+
+  return { cleared };
 }
 
 /**
