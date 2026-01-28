@@ -1372,6 +1372,9 @@ async function processBackfillLibrarySnapshotsJob(
   try {
     await publishProgress();
 
+    // Extend lock before initial scan - can be slow on large libraries
+    await extendJobLock(job);
+
     // Get all server+library combinations with their date ranges
     // Only consider items with valid file_size (consistent with INVALID_SNAPSHOT_CONDITION
     // which deletes snapshots with total_size=0). This prevents an infinite loop where
@@ -1421,6 +1424,9 @@ async function processBackfillLibrarySnapshotsJob(
     activeJobProgress.message = `Processing ${libraries.length} libraries...`;
     await publishProgress();
 
+    // Extend lock before starting the long processing loop
+    await extendJobLock(job);
+
     let totalProcessed = 0;
     let totalSnapshotsCreated = 0;
     let totalErrors = 0;
@@ -1443,6 +1449,9 @@ async function processBackfillLibrarySnapshotsJob(
 
           const batchStartStr = batchStart.toISOString().split('T')[0];
           const batchEndStr = batchEnd.toISOString().split('T')[0];
+
+          // Extend lock BEFORE the heavy query - single batch can take 10+ minutes on large libraries
+          await extendJobLock(job);
 
           // Insert daily snapshots for this batch using window functions
           // This reconstructs historical state from item creation dates
