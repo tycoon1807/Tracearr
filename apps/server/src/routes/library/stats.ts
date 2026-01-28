@@ -1,7 +1,11 @@
 /**
  * Library Stats Route
  *
- * GET /stats - Current library statistics from library_items table (real-time)
+ * GET /stats - Current library statistics from latest snapshots
+ *
+ * Uses library_snapshots for consistency with growth charts. Snapshots already
+ * filter out invalid items (missing episodes with no file size), ensuring
+ * accurate counts that match the graph data.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -73,36 +77,53 @@ export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
         }
       }
 
-      // Build server filter for library_items table
+      // Build server filter for library_snapshots table
       const serverFilter = serverId
-        ? sql`AND li.server_id = ${serverId}::uuid`
+        ? sql`AND ls.server_id = ${serverId}::uuid`
         : authUser.serverIds?.length
-          ? sql`AND li.server_id IN (${sql.join(
+          ? sql`AND ls.server_id IN (${sql.join(
               authUser.serverIds.map((id: string) => sql`${id}::uuid`),
               sql`, `
             )})`
           : sql``;
 
       // Optional library filter
-      const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
+      const libraryFilter = libraryId ? sql`AND ls.library_id = ${libraryId}` : sql``;
 
-      // Query library_items directly for real-time stats
+      // Query latest snapshot per library, then aggregate across all matching libraries.
+      // This ensures stats match the graph data (both use snapshots which filter out
+      // invalid items like missing episodes with no file size). Fixes #240.
       const result = await db.execute(sql`
+        WITH latest_snapshots AS (
+          SELECT DISTINCT ON (ls.server_id, ls.library_id)
+            ls.item_count,
+            ls.total_size,
+            ls.movie_count,
+            ls.episode_count,
+            ls.show_count,
+            ls.count_4k,
+            ls.count_1080p,
+            ls.count_720p,
+            ls.count_sd,
+            ls.snapshot_time
+          FROM library_snapshots ls
+          WHERE 1=1
+            ${serverFilter}
+            ${libraryFilter}
+          ORDER BY ls.server_id, ls.library_id, ls.snapshot_time DESC
+        )
         SELECT
-          COUNT(*)::int AS total_items,
-          COALESCE(SUM(li.file_size), 0)::bigint AS total_size_bytes,
-          COUNT(*) FILTER (WHERE li.media_type = 'movie')::int AS movie_count,
-          COUNT(*) FILTER (WHERE li.media_type = 'episode')::int AS episode_count,
-          COUNT(DISTINCT CASE WHEN li.media_type = 'episode' THEN li.parent_rating_key END)::int AS show_count,
-          COUNT(*) FILTER (WHERE li.video_resolution = '4k')::int AS count_4k,
-          COUNT(*) FILTER (WHERE li.video_resolution = '1080p')::int AS count_1080p,
-          COUNT(*) FILTER (WHERE li.video_resolution = '720p')::int AS count_720p,
-          COUNT(*) FILTER (WHERE li.video_resolution IN ('sd', '480p', '576p') OR (li.video_resolution IS NULL AND li.media_type IN ('movie', 'episode')))::int AS count_sd,
-          MAX(li.updated_at) AS as_of
-        FROM library_items li
-        WHERE li.media_type IN ('movie', 'episode', 'track')
-          ${serverFilter}
-          ${libraryFilter}
+          COALESCE(SUM(item_count), 0)::int AS total_items,
+          COALESCE(SUM(total_size), 0)::bigint AS total_size_bytes,
+          COALESCE(SUM(movie_count), 0)::int AS movie_count,
+          COALESCE(SUM(episode_count), 0)::int AS episode_count,
+          COALESCE(SUM(show_count), 0)::int AS show_count,
+          COALESCE(SUM(count_4k), 0)::int AS count_4k,
+          COALESCE(SUM(count_1080p), 0)::int AS count_1080p,
+          COALESCE(SUM(count_720p), 0)::int AS count_720p,
+          COALESCE(SUM(count_sd), 0)::int AS count_sd,
+          MAX(snapshot_time) AS as_of
+        FROM latest_snapshots
       `);
 
       const row = result.rows[0] as

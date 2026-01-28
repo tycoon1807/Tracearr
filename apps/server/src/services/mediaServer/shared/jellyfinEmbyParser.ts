@@ -589,26 +589,36 @@ export function extractQuality(
 }
 
 /**
- * Safely parse a date string or timestamp
+ * Minimum valid year for library items.
+ * Emby/Jellyfin may return ancient dates like "0001-01-01" for items with missing metadata.
+ */
+const MIN_VALID_YEAR = 2015;
+
+/**
+ * Safely parse a date string or timestamp.
+ * Returns undefined for invalid dates or dates before MIN_VALID_YEAR.
  */
 export function parseLibraryDate(value: unknown): Date | undefined {
   if (!value) return undefined;
 
+  let date: Date | undefined;
+
   if (value instanceof Date) {
-    return isNaN(value.getTime()) ? undefined : value;
+    date = isNaN(value.getTime()) ? undefined : value;
+  } else if (typeof value === 'string') {
+    const parsed = new Date(value);
+    date = isNaN(parsed.getTime()) ? undefined : parsed;
+  } else if (typeof value === 'number') {
+    const parsed = new Date(value);
+    date = isNaN(parsed.getTime()) ? undefined : parsed;
   }
 
-  if (typeof value === 'string') {
-    const date = new Date(value);
-    return isNaN(date.getTime()) ? undefined : date;
+  // Reject dates before MIN_VALID_YEAR - these indicate missing/corrupt metadata
+  if (date && date.getFullYear() < MIN_VALID_YEAR) {
+    return undefined;
   }
 
-  if (typeof value === 'number') {
-    const date = new Date(value);
-    return isNaN(date.getTime()) ? undefined : date;
-  }
-
-  return undefined;
+  return date;
 }
 
 /**
@@ -618,12 +628,21 @@ export function parseLibraryItem(item: Record<string, unknown>): MediaLibraryIte
   const providerIds = parseProviderIds(item.ProviderIds);
   const quality = extractQuality(item.MediaSources, item.MediaStreams);
 
+  // Parse year first so we can use it as addedAt fallback
+  const year = parseOptionalNumber(item.ProductionYear);
+
+  // Fallback chain for addedAt: DateCreated -> Jan 1 of ProductionYear -> now
+  // Only use year fallback if it's >= MIN_VALID_YEAR (2015)
+  const dateCreated = parseLibraryDate(item.DateCreated);
+  const yearFallback = year && year >= MIN_VALID_YEAR ? new Date(Date.UTC(year, 0, 1)) : undefined;
+  const addedAt = dateCreated ?? yearFallback ?? new Date();
+
   const result: MediaLibraryItem = {
     ratingKey: parseString(item.Id),
     title: parseString(item.Name),
     mediaType: mapJellyfinType(item.Type),
-    year: parseOptionalNumber(item.ProductionYear),
-    addedAt: parseLibraryDate(item.DateCreated) ?? new Date(),
+    year,
+    addedAt,
     // Quality fields
     videoResolution: quality.videoResolution,
     videoCodec: quality.videoCodec,
