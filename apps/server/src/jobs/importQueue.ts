@@ -364,8 +364,9 @@ async function processTautulliImportJob(
       activeImportProgress.progress = progress;
     }
 
-    // Extend lock - fails fast if lock is lost to avoid wasted work on large imports
+    // Extend locks - fails fast if lock is lost to avoid wasted work on large imports
     await extendJobLock(job, 5 * 60 * 1000);
+    await extendHeavyOpsLock(job.id!);
 
     // Publish to WebSocket for UI
     if (pubSubService) {

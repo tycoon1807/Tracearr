@@ -15,6 +15,7 @@ import { extendJobLock } from './lockUtils.js';
 import {
   acquireHeavyOpsLock,
   releaseHeavyOpsLock,
+  extendHeavyOpsLock,
   type HeavyOpsLockHolder,
 } from './heavyOpsLock.js';
 import type {
@@ -507,8 +508,9 @@ async function processNormalizePlayersJob(
       await job.updateProgress(percent);
       await publishProgress();
 
-      // Extend lock - fails fast if lock is lost to avoid wasted work
+      // Extend locks - fails fast if lock is lost to avoid wasted work
       await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
 
       // Brief pause between batches to let other operations through
       if (totalProcessed < totalRecords) {
@@ -735,8 +737,9 @@ async function processNormalizeCountriesJob(
       await job.updateProgress(percent);
       await publishProgress();
 
-      // Extend lock - fails fast if lock is lost to avoid wasted work
+      // Extend locks - fails fast if lock is lost to avoid wasted work
       await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
 
       if (totalProcessed < totalRecords) {
         await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
@@ -967,8 +970,9 @@ async function processFixImportedProgressJob(
       await job.updateProgress(percent);
       await publishProgress();
 
-      // Extend lock - fails fast if lock is lost to avoid wasted work
+      // Extend locks - fails fast if lock is lost to avoid wasted work
       await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
 
       if (totalProcessed < totalRecords) {
         await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
@@ -1234,8 +1238,9 @@ async function processNormalizeCodecsJob(
       await job.updateProgress(percent);
       await publishProgress();
 
-      // Extend lock - fails fast if lock is lost to avoid wasted work
+      // Extend locks - fails fast if lock is lost to avoid wasted work
       await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
     }
 
     const durationMs = Date.now() - startTime;
@@ -1369,8 +1374,9 @@ async function processBackfillUserDatesJob(
     await job.updateProgress(50);
     await publishProgress();
 
-    // Extend lock after first bulk update - these can take time on large databases
+    // Extend locks after first bulk update - these can take time on large databases
     await extendJobLock(job);
+    await extendHeavyOpsLock(job.id!);
 
     // Step 2: Update lastActivityAt to most recent session for all users with sessions
     // We update even if not NULL to ensure it's the most recent activity
@@ -1392,8 +1398,9 @@ async function processBackfillUserDatesJob(
       totalErrors++;
     }
 
-    // Extend lock after second bulk update
+    // Extend locks after second bulk update
     await extendJobLock(job);
+    await extendHeavyOpsLock(job.id!);
 
     const totalUpdated = joinedAtUpdated + lastActivityUpdated;
     const durationMs = Date.now() - startTime;
@@ -1475,8 +1482,9 @@ async function processBackfillLibrarySnapshotsJob(
   try {
     await publishProgress();
 
-    // Extend lock before initial scan - can be slow on large libraries
+    // Extend locks before initial scan - can be slow on large libraries
     await extendJobLock(job);
+    await extendHeavyOpsLock(job.id!);
 
     // Get all server+library combinations with their date ranges
     // Only consider items with valid file_size (consistent with INVALID_SNAPSHOT_CONDITION
@@ -1527,8 +1535,9 @@ async function processBackfillLibrarySnapshotsJob(
     activeJobProgress.message = `Processing ${libraries.length} libraries...`;
     await publishProgress();
 
-    // Extend lock before starting the long processing loop
+    // Extend locks before starting the long processing loop
     await extendJobLock(job);
+    await extendHeavyOpsLock(job.id!);
 
     let totalProcessed = 0;
     let totalSnapshotsCreated = 0;
@@ -1543,8 +1552,9 @@ async function processBackfillLibrarySnapshotsJob(
         const libEndStr = libEndDate.toISOString().split('T')[0];
         let librarySnapshotsCreated = 0;
 
-        // Extend lock before the pre-computation phase
+        // Extend locks before the pre-computation phase
         await extendJobLock(job);
+        await extendHeavyOpsLock(job.id!);
 
         // PHASE 1: Pre-compute cumulative data ONCE for the entire library
         // Drop and recreate temp table for each library (Drizzle auto-commits each statement,
@@ -1662,8 +1672,9 @@ async function processBackfillLibrarySnapshotsJob(
           WHERE item_count > 0 AND total_size > 0
         `);
 
-        // Extend lock after pre-computation
+        // Extend locks after pre-computation
         await extendJobLock(job);
+        await extendHeavyOpsLock(job.id!);
 
         // Batch INSERT from pre-computed temp table
         // Each batch is now a simple SELECT from the temp table
@@ -1678,8 +1689,9 @@ async function processBackfillLibrarySnapshotsJob(
           const batchStartStr = batchStart.toISOString().split('T')[0];
           const batchEndStr = batchEnd.toISOString().split('T')[0];
 
-          // Extend lock before each batch INSERT
+          // Extend locks before each batch INSERT
           await extendJobLock(job);
+          await extendHeavyOpsLock(job.id!);
 
           // Simple INSERT from pre-computed data
           const result = await db.execute(sql`
@@ -1725,8 +1737,9 @@ async function processBackfillLibrarySnapshotsJob(
 
           librarySnapshotsCreated += Number(result.rowCount ?? 0);
 
-          // Extend lock after each batch
+          // Extend locks after each batch
           await extendJobLock(job);
+          await extendHeavyOpsLock(job.id!);
 
           // Move to next batch
           batchStart = new Date(batchEnd);
@@ -1747,8 +1760,9 @@ async function processBackfillLibrarySnapshotsJob(
         await job.updateProgress(percent);
         await publishProgress();
 
-        // Extend lock after each library as well
+        // Extend locks after each library as well
         await extendJobLock(job);
+        await extendHeavyOpsLock(job.id!);
       } catch (error) {
         console.error(
           `[Maintenance] Error processing library ${lib.server_id}/${lib.library_id}:`,
@@ -2031,8 +2045,9 @@ async function processCleanupOldChunksJob(
         }
       }
 
-      // Extend lock after each batch - fails fast if lock is lost
+      // Extend locks after each batch - fails fast if lock is lost
       await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
 
       // Move to next batch
       currentDate = new Date(batchEnd);
