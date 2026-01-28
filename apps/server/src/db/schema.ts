@@ -259,7 +259,7 @@ export const sessions = pgTable(
       .$type<(typeof mediaTypeEnum)[number]>(),
     mediaTitle: text('media_title').notNull(),
     // Enhanced media metadata for episodes
-    grandparentTitle: varchar('grandparent_title', { length: 500 }), // Show name (for episodes)
+    grandparentTitle: text('grandparent_title'), // Show name (for episodes)
     seasonNumber: integer('season_number'), // Season number (for episodes)
     episodeNumber: integer('episode_number'), // Episode number (for episodes)
     year: integer('year'), // Release year
@@ -827,7 +827,7 @@ export const libraryItems = pgTable(
     tvdbId: integer('tvdb_id'), // TVDB ID
 
     // Media metadata
-    title: varchar('title', { length: 500 }).notNull(),
+    title: text('title').notNull(),
     mediaType: varchar('media_type', { length: 20 }).notNull(), // movie, episode, season, show, artist, album, track
     year: integer('year'),
 
@@ -844,9 +844,9 @@ export const libraryItems = pgTable(
     // Hierarchy fields for episodes and tracks (Plex-style naming)
     // For episodes: grandparent=show, parent=season, item_index=episode#, parent_index=season#
     // For tracks: grandparent=artist, parent=album, item_index=track#
-    grandparentTitle: varchar('grandparent_title', { length: 500 }),
+    grandparentTitle: text('grandparent_title'),
     grandparentRatingKey: varchar('grandparent_rating_key', { length: 255 }),
-    parentTitle: varchar('parent_title', { length: 500 }),
+    parentTitle: text('parent_title'),
     parentRatingKey: varchar('parent_rating_key', { length: 255 }),
     parentIndex: integer('parent_index'), // season number for episodes
     itemIndex: integer('item_index'), // episode number or track number
