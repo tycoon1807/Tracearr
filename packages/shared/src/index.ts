@@ -43,6 +43,9 @@ export type {
   AccountInactivityParams,
   RuleParams,
   Rule,
+  // Rule V2
+  RuleConditions,
+  RuleActions,
   // Violation
   ViolationSeverity,
   Violation,

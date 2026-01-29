@@ -5,7 +5,7 @@
  * Includes batch loading for performance optimization and rule fetching.
  */
 
-import { eq, and, desc, gte, inArray } from 'drizzle-orm';
+import { eq, and, desc, gte, inArray, isNotNull } from 'drizzle-orm';
 import {
   TIME_MS,
   SESSION_LIMITS,
@@ -73,7 +73,10 @@ export async function batchGetRecentUserSessions(
 // ============================================================================
 
 /**
- * Get all active rules for evaluation
+ * Get all active legacy (V1) rules for evaluation
+ *
+ * Only returns rules with type and params set (legacy format).
+ * V2 rules using conditions/actions are evaluated by a separate system.
  *
  * @returns Array of active Rule objects
  *
@@ -82,12 +85,16 @@ export async function batchGetRecentUserSessions(
  * // Evaluate each session against these rules
  */
 export async function getActiveRules(): Promise<Rule[]> {
-  const activeRules = await db.select().from(rules).where(eq(rules.isActive, true));
+  // Filter for legacy rules that have type set (V2 rules have type=null)
+  const activeRules = await db
+    .select()
+    .from(rules)
+    .where(and(eq(rules.isActive, true), isNotNull(rules.type)));
 
   return activeRules.map((r) => ({
     id: r.id,
     name: r.name,
-    type: r.type,
+    type: r.type!,
     params: r.params as unknown as RuleParams,
     serverUserId: r.serverUserId,
     isActive: r.isActive,

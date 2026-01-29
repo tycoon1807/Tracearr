@@ -60,6 +60,8 @@ import type {
   StreamAudioDetails,
   TranscodeInfo,
   SubtitleInfo,
+  RuleConditions,
+  RuleActions,
 } from '@tracearr/shared';
 
 // Re-export for consumers of this module
@@ -375,9 +377,15 @@ export const rules = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: varchar('name', { length: 100 }).notNull(),
-    type: varchar('type', { length: 50 }).notNull().$type<(typeof ruleTypeEnum)[number]>(),
-    params: jsonb('params').notNull().$type<Record<string, unknown>>(),
-    // Nullable: null = global rule, set = specific server user
+    description: text('description'),
+    // Legacy columns - will be removed after migration
+    type: varchar('type', { length: 50 }).$type<(typeof ruleTypeEnum)[number]>(),
+    params: jsonb('params').$type<Record<string, unknown>>(),
+    // New V2 columns
+    conditions: jsonb('conditions').$type<RuleConditions>(),
+    actions: jsonb('actions').$type<RuleActions>(),
+    // Scope
+    serverId: uuid('server_id').references(() => servers.id, { onDelete: 'cascade' }),
     serverUserId: uuid('server_user_id').references(() => serverUsers.id, { onDelete: 'cascade' }),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -385,6 +393,7 @@ export const rules = pgTable(
   },
   (table) => [
     index('rules_active_idx').on(table.isActive),
+    index('rules_server_id_idx').on(table.serverId),
     index('rules_server_user_id_idx').on(table.serverUserId),
   ]
 );
@@ -718,6 +727,10 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
 }));
 
 export const rulesRelations = relations(rules, ({ one, many }) => ({
+  server: one(servers, {
+    fields: [rules.serverId],
+    references: [servers.id],
+  }),
   serverUser: one(serverUsers, {
     fields: [rules.serverUserId],
     references: [serverUsers.id],

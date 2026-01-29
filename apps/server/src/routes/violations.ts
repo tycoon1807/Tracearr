@@ -232,8 +232,10 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
     const total = (countResult.rows[0] as { count: number })?.count ?? 0;
 
     // Identify violations that need historical/related data to batch queries
-    const violationsNeedingData = violationData.filter((v) =>
-      ['concurrent_streams', 'simultaneous_locations', 'device_velocity'].includes(v.ruleType)
+    const violationsNeedingData = violationData.filter(
+      (v) =>
+        v.ruleType &&
+        ['concurrent_streams', 'simultaneous_locations', 'device_velocity'].includes(v.ruleType)
     );
 
     // Collect all relatedSessionIds from violation data for direct lookup
@@ -541,6 +543,7 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
       };
 
       if (
+        v.ruleType &&
         ['concurrent_streams', 'simultaneous_locations', 'device_velocity'].includes(v.ruleType)
       ) {
         const violationTime = v.createdAt;
