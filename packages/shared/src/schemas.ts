@@ -350,7 +350,7 @@ export const conditionFieldSchema = z.union([
 ]);
 
 // Enums
-export const videoResolutionSchema = z.enum(['4k', '1080p', '720p', '480p', 'sd', 'unknown']);
+export const videoResolutionSchema = z.enum(['4K', '1080p', '720p', '480p', 'SD', 'unknown']);
 export const deviceTypeSchema = z.enum(['mobile', 'tablet', 'tv', 'desktop', 'browser', 'unknown']);
 export const platformSchema = z.enum([
   'ios',

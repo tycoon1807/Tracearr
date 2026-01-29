@@ -457,7 +457,7 @@ export type ConditionField =
   | ScopeField;
 
 // Resolution enum for stream quality
-export type VideoResolution = '4k' | '1080p' | '720p' | '480p' | 'sd' | 'unknown';
+export type VideoResolution = '4K' | '1080p' | '720p' | '480p' | 'SD' | 'unknown';
 
 // Device type enum
 export type DeviceType = 'mobile' | 'tablet' | 'tv' | 'desktop' | 'browser' | 'unknown';

@@ -54,6 +54,10 @@ export type {
   Action,
   RuleActions,
   RuleV2,
+  VideoResolution,
+  DeviceType,
+  Platform,
+  MediaTypeEnum,
   // Violation
   ViolationSeverity,
   Violation,
