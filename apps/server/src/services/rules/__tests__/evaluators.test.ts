@@ -1213,6 +1213,113 @@ describe('Network/Location Evaluators', () => {
       ).toBe(true);
     });
   });
+
+  describe('ip_in_range', () => {
+    it('matches IP within CIDR range using in operator', () => {
+      const session = createMockSession({ ipAddress: '192.168.1.100' });
+      const ctx = createTestContext({ session });
+
+      const evaluator = evaluatorRegistry.ip_in_range;
+      expect(
+        evaluator(
+          ctx,
+          createCondition({ field: 'ip_in_range', operator: 'in', value: ['192.168.0.0/16'] })
+        )
+      ).toBe(true);
+    });
+
+    it('matches IP within multiple CIDR ranges', () => {
+      const session = createMockSession({ ipAddress: '10.0.5.25' });
+      const ctx = createTestContext({ session });
+
+      const evaluator = evaluatorRegistry.ip_in_range;
+      expect(
+        evaluator(
+          ctx,
+          createCondition({
+            field: 'ip_in_range',
+            operator: 'in',
+            value: ['192.168.0.0/16', '10.0.0.0/8'],
+          })
+        )
+      ).toBe(true);
+    });
+
+    it('returns false when IP not in any CIDR range', () => {
+      const session = createMockSession({ ipAddress: '8.8.8.8' });
+      const ctx = createTestContext({ session });
+
+      const evaluator = evaluatorRegistry.ip_in_range;
+      expect(
+        evaluator(
+          ctx,
+          createCondition({ field: 'ip_in_range', operator: 'in', value: ['192.168.0.0/16'] })
+        )
+      ).toBe(false);
+    });
+
+    it('works with not_in operator', () => {
+      const session = createMockSession({ ipAddress: '8.8.8.8' });
+      const ctx = createTestContext({ session });
+
+      const evaluator = evaluatorRegistry.ip_in_range;
+      expect(
+        evaluator(
+          ctx,
+          createCondition({
+            field: 'ip_in_range',
+            operator: 'not_in',
+            value: ['192.168.0.0/16', '10.0.0.0/8'],
+          })
+        )
+      ).toBe(true);
+    });
+
+    it('works with eq operator for single CIDR', () => {
+      const session = createMockSession({ ipAddress: '172.16.5.10' });
+      const ctx = createTestContext({ session });
+
+      const evaluator = evaluatorRegistry.ip_in_range;
+      expect(
+        evaluator(
+          ctx,
+          createCondition({ field: 'ip_in_range', operator: 'eq', value: '172.16.0.0/12' })
+        )
+      ).toBe(true);
+    });
+
+    it('handles /32 prefix (exact IP match)', () => {
+      const session = createMockSession({ ipAddress: '192.168.1.1' });
+      const ctx = createTestContext({ session });
+
+      const evaluator = evaluatorRegistry.ip_in_range;
+      expect(
+        evaluator(
+          ctx,
+          createCondition({ field: 'ip_in_range', operator: 'eq', value: '192.168.1.1/32' })
+        )
+      ).toBe(true);
+      expect(
+        evaluator(
+          ctx,
+          createCondition({ field: 'ip_in_range', operator: 'eq', value: '192.168.1.2/32' })
+        )
+      ).toBe(false);
+    });
+
+    it('returns false when ipAddress is missing', () => {
+      const session = createMockSession({ ipAddress: undefined });
+      const ctx = createTestContext({ session });
+
+      const evaluator = evaluatorRegistry.ip_in_range;
+      expect(
+        evaluator(
+          ctx,
+          createCondition({ field: 'ip_in_range', operator: 'in', value: ['0.0.0.0/0'] })
+        )
+      ).toBe(false);
+    });
+  });
 });
 
 describe('Scope Evaluators', () => {

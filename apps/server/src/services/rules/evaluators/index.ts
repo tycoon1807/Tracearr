@@ -519,13 +519,76 @@ const evaluateCountry: ConditionEvaluator = (
   return compare(country, condition.operator, condition.value);
 };
 
+/**
+ * Parse an IPv4 address into a 32-bit number.
+ */
+function ipv4ToNumber(ip: string): number | null {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return null;
+
+  let result = 0;
+  for (const part of parts) {
+    const num = parseInt(part, 10);
+    if (isNaN(num) || num < 0 || num > 255) return null;
+    result = (result << 8) + num;
+  }
+  return result >>> 0; // Convert to unsigned 32-bit
+}
+
+/**
+ * Check if an IP address is within a CIDR range.
+ * Supports IPv4 only. Returns false for IPv6 or invalid input.
+ */
+function isIpInCidr(ip: string, cidr: string): boolean {
+  const ipNum = ipv4ToNumber(ip);
+  if (ipNum === null) return false;
+
+  const [rangeIp, prefixStr] = cidr.split('/');
+  if (!rangeIp || !prefixStr) return false;
+
+  const rangeNum = ipv4ToNumber(rangeIp);
+  if (rangeNum === null) return false;
+
+  const prefix = parseInt(prefixStr, 10);
+  if (isNaN(prefix) || prefix < 0 || prefix > 32) return false;
+
+  // Create mask: for prefix=24, mask = 0xFFFFFF00
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+
+  return (ipNum & mask) === (rangeNum & mask);
+}
+
 const evaluateIpInRange: ConditionEvaluator = (
-  _context: EvaluationContext,
-  _condition: Condition
+  context: EvaluationContext,
+  condition: Condition
 ): boolean => {
-  // TODO: Implement CIDR range checking
-  // This would require parsing CIDR notation and checking if the IP falls within the range
-  // For now, return false as a placeholder
+  const { session } = context;
+  const ip = session.ipAddress;
+
+  if (!ip) return false;
+
+  // Handle 'in' and 'not_in' operators with array of CIDR ranges
+  if (condition.operator === 'in' || condition.operator === 'not_in') {
+    if (!Array.isArray(condition.value)) return false;
+
+    const inRange = condition.value.some((cidr) => {
+      if (typeof cidr !== 'string') return false;
+      return isIpInCidr(ip, cidr);
+    });
+
+    return condition.operator === 'in' ? inRange : !inRange;
+  }
+
+  // Handle 'eq' operator with single CIDR range
+  if (condition.operator === 'eq' && typeof condition.value === 'string') {
+    return isIpInCidr(ip, condition.value);
+  }
+
+  // Handle 'neq' operator with single CIDR range
+  if (condition.operator === 'neq' && typeof condition.value === 'string') {
+    return !isIpInCidr(ip, condition.value);
+  }
+
   return false;
 };
 
