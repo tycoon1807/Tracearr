@@ -330,6 +330,13 @@
       "when": 1769714540940,
       "tag": "0046_salty_serpent_society",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1769744309925,
+      "tag": "0047_careless_sunspot",
+      "breakpoints": true
     }
   ]
 }

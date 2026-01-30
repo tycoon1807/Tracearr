@@ -445,6 +445,26 @@ export const violations = pgTable(
   ]
 );
 
+// Rule action execution results (for V2 rules)
+export const ruleActionResults = pgTable(
+  'rule_action_results',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    violationId: uuid('violation_id').references(() => violations.id, { onDelete: 'cascade' }),
+    ruleId: uuid('rule_id').references(() => rules.id, { onDelete: 'cascade' }),
+    actionType: varchar('action_type', { length: 50 }).notNull(),
+    success: boolean('success').notNull(),
+    skipped: boolean('skipped').default(false),
+    skipReason: text('skip_reason'),
+    errorMessage: text('error_message'),
+    executedAt: timestamp('executed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_rule_action_results_violation').on(table.violationId),
+    index('idx_rule_action_results_rule').on(table.ruleId),
+  ]
+);
+
 // Mobile pairing tokens (one-time use, expire after 15 minutes)
 export const mobileTokens = pgTable('mobile_tokens', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -736,9 +756,10 @@ export const rulesRelations = relations(rules, ({ one, many }) => ({
     references: [serverUsers.id],
   }),
   violations: many(violations),
+  actionResults: many(ruleActionResults),
 }));
 
-export const violationsRelations = relations(violations, ({ one }) => ({
+export const violationsRelations = relations(violations, ({ one, many }) => ({
   rule: one(rules, {
     fields: [violations.ruleId],
     references: [rules.id],
@@ -750,6 +771,18 @@ export const violationsRelations = relations(violations, ({ one }) => ({
   session: one(sessions, {
     fields: [violations.sessionId],
     references: [sessions.id],
+  }),
+  actionResults: many(ruleActionResults),
+}));
+
+export const ruleActionResultsRelations = relations(ruleActionResults, ({ one }) => ({
+  violation: one(violations, {
+    fields: [ruleActionResults.violationId],
+    references: [violations.id],
+  }),
+  rule: one(rules, {
+    fields: [ruleActionResults.ruleId],
+    references: [rules.id],
   }),
 }));
 
