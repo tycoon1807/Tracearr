@@ -833,6 +833,42 @@ export class PushNotificationService {
   }
 
   /**
+   * Send a test notification to verify push is working for a specific device
+   */
+  async sendTestNotification(expoPushToken: string): Promise<{ success: boolean; error?: string }> {
+    if (!Expo.isExpoPushToken(expoPushToken)) {
+      return { success: false, error: 'Invalid push token format' };
+    }
+
+    const message: ExpoPushMessage = {
+      to: expoPushToken,
+      title: 'Tracearr',
+      body: 'Test notification received successfully!',
+      data: { type: 'test' },
+      sound: 'default',
+      priority: 'high',
+    };
+
+    try {
+      const tickets = await expo.sendPushNotificationsAsync([message]);
+      const ticket = tickets[0];
+
+      if (!ticket) {
+        return { success: false, error: 'No response from Expo' };
+      }
+
+      if (ticket.status === 'error') {
+        return { success: false, error: ticket.message ?? 'Push failed' };
+      }
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
    * Send server up notification to devices that have enabled server alerts
    */
   async notifyServerUp(serverName: string, serverId: string): Promise<void> {
