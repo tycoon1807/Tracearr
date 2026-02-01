@@ -13,6 +13,7 @@
   <a href="https://ghcr.io/connorgallopo/tracearr"><img src="https://img.shields.io/badge/ghcr.io-tracearr-blue?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
   <a href="https://github.com/connorgallopo/Tracearr/blob/main/LICENSE"><img src="https://img.shields.io/github/license/connorgallopo/Tracearr?style=flat-square" alt="License" /></a>
   <a href="https://discord.gg/a7n3sFd2Yw"><img src="https://img.shields.io/discord/1444393247978946684?style=flat-square&logo=discord&logoColor=white&label=Discord&color=5865F2" alt="Discord" /></a>
+  <a href="https://docs.tracearr.com"><img src="https://img.shields.io/badge/docs-tracearr.com-18D1E7?style=flat-square" alt="Documentation" /></a>
 </p>
 
 ---
@@ -85,7 +86,7 @@ Tracearr handles all three. One install, one interface.
 
 ## Quick Start
 
-The supervised image bundles TimescaleDB, Redis, and Tracearr in a single container. Requires 2GB+ RAM. Secrets are auto-generated on first run.
+The supervised image bundles TimescaleDB, Redis, and Tracearr in a single container. **Designed for Unraid and intended for bare metal hosts only** (not recommended for VMs or nested containers). Requires 2GB+ RAM. Secrets are auto-generated on first run.
 
 ```bash
 docker compose -f docker/examples/docker-compose.supervised-example.yml up -d
@@ -93,7 +94,7 @@ docker compose -f docker/examples/docker-compose.supervised-example.yml up -d
 
 Open `http://localhost:3000` and connect your Plex, Jellyfin, or Emby server.
 
-For separate services, Portainer deployment, or detailed requirements, see the [Docker deployment guide](docker/examples/README.md).
+For separate services, Portainer deployment, or detailed requirements, see the [Docker deployment guide](docker/examples/README.md). For full documentation, visit [docs.tracearr.com](https://docs.tracearr.com).
 
 ### Docker Tags
 

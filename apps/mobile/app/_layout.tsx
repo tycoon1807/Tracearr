@@ -5,85 +5,105 @@ import { Buffer } from 'buffer';
 global.Buffer = Buffer;
 
 import '../global.css';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet, Text, Pressable } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryProvider } from '@/providers/QueryProvider';
 import { SocketProvider } from '@/providers/SocketProvider';
 import { MediaServerProvider } from '@/providers/MediaServerProvider';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { useAuthStore } from '@/lib/authStore';
+import { OfflineBanner } from '@/components/OfflineBanner';
+import { UnauthenticatedScreen } from '@/components/UnauthenticatedScreen';
+import { Toast } from '@/components/Toast';
+import { useShallow } from 'zustand/react/shallow';
+import { useAuthStateStore } from '@/lib/authStateStore';
+import { useConnectionValidator } from '@/hooks/useConnectionValidator';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
-import { colors } from '@/lib/theme';
+import { ACCENT_COLOR } from '@/lib/theme';
 
 function RootLayoutNav() {
-  const {
-    isAuthenticated,
-    isLoading,
-    initialize,
-    storageAvailable,
-    retryStorageAccess,
-    resetStorageState,
-  } = useAuthStore();
+  // Use single-server auth state store with shallow compare for performance
+  const { server, isInitializing, connectionState, tokenStatus } = useAuthStateStore(
+    useShallow((s) => ({
+      server: s.server,
+      isInitializing: s.isInitializing,
+      connectionState: s.connectionState,
+      tokenStatus: s.tokenStatus,
+    }))
+  );
+
+  // Derived auth state
+  const isAuthenticated = server !== null && tokenStatus !== 'revoked';
+
+  const { validate } = useConnectionValidator();
   const segments = useSegments();
   const router = useRouter();
-  const [hasInitialized, setHasInitialized] = useState(false);
+  const [showReconnectedToast, setShowReconnectedToast] = useState(false);
+  const prevConnectionState = useRef(connectionState);
 
   usePushNotifications();
 
+  // Track connection state changes for reconnection toast
   useEffect(() => {
-    void initialize().finally(() => setHasInitialized(true));
-  }, [initialize]);
+    if (prevConnectionState.current === 'disconnected' && connectionState === 'connected') {
+      setShowReconnectedToast(true);
+    }
+    prevConnectionState.current = connectionState;
+  }, [connectionState]);
 
   // Handle navigation based on auth state
+  // Don't redirect if unauthenticated - we show UnauthenticatedScreen instead
   useEffect(() => {
-    if (isLoading || !hasInitialized || !storageAvailable) return;
+    if (isInitializing) return;
+    if (connectionState === 'unauthenticated') return;
 
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/(auth)/pair');
     }
-  }, [isAuthenticated, isLoading, hasInitialized, storageAvailable, segments, router]);
+  }, [isAuthenticated, isInitializing, segments, router, connectionState]);
 
-  if (isLoading) {
+  if (isInitializing) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={colors.cyan.core} />
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: '#09090B',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <ActivityIndicator size="large" color={ACCENT_COLOR} />
       </View>
     );
   }
 
-  if (!storageAvailable) {
+  // Show unauthenticated screen when token is revoked
+  if (connectionState === 'unauthenticated') {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.errorText}>Storage Unavailable</Text>
-        <Text style={styles.statusSubtext}>
-          Secure storage isn't responding. Try disabling battery saver or restarting the app.
-        </Text>
-        <Pressable
-          style={styles.retryButton}
-          onPress={() => {
-            resetStorageState();
-            void retryStorageAccess();
-          }}
-        >
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </Pressable>
-      </View>
+      <>
+        <StatusBar style="auto" translucent={false} />
+        <UnauthenticatedScreen />
+      </>
     );
   }
 
   return (
     <>
-      <StatusBar style="light" backgroundColor={colors.background.dark} translucent={false} />
+      <StatusBar style="auto" translucent={false} />
+      <OfflineBanner onRetry={validate} />
+      <Toast
+        message="Reconnected"
+        visible={showReconnectedToast}
+        onHide={() => setShowReconnectedToast(false)}
+      />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: colors.background.dark },
           animation: 'fade',
         }}
       >
@@ -125,56 +145,20 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={styles.container}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ErrorBoundary>
-          <QueryProvider>
-            <SocketProvider>
-              <MediaServerProvider>
-                <RootLayoutNav />
-              </MediaServerProvider>
-            </SocketProvider>
-          </QueryProvider>
-        </ErrorBoundary>
+        <View style={{ flex: 1, backgroundColor: '#09090B' }}>
+          <ErrorBoundary>
+            <QueryProvider>
+              <SocketProvider>
+                <MediaServerProvider>
+                  <RootLayoutNav />
+                </MediaServerProvider>
+              </SocketProvider>
+            </QueryProvider>
+          </ErrorBoundary>
+        </View>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background.dark,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.background.dark,
-    paddingHorizontal: 32,
-  },
-  statusSubtext: {
-    color: colors.text.secondary.dark,
-    fontSize: 14,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  errorText: {
-    color: colors.error,
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  retryButton: {
-    marginTop: 24,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    backgroundColor: colors.cyan.core,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: colors.background.dark,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});

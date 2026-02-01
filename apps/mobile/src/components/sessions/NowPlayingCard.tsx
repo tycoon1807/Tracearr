@@ -13,31 +13,16 @@ import { View, Image, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '@/components/ui/text';
 import { UserAvatar } from '@/components/ui/user-avatar';
-import { useAuthStore } from '@/lib/authStore';
+import { useImageUrl } from '@/hooks/useImageUrl';
 import { useEstimatedProgress } from '@/hooks/useEstimatedProgress';
 import { useResponsive } from '@/hooks/useResponsive';
-import { colors, spacing, borderRadius, typography } from '@/lib/theme';
+import { ACCENT_COLOR, colors, spacing } from '@/lib/theme';
+import { formatDuration } from '@/lib/formatters';
 import type { ActiveSession } from '@tracearr/shared';
 
 interface NowPlayingCardProps {
   session: ActiveSession;
   onPress?: (session: ActiveSession) => void;
-}
-
-/**
- * Format duration in ms to readable string (HH:MM:SS or MM:SS)
- */
-function formatDuration(ms: number | null): string {
-  if (!ms) return '--:--';
-  const seconds = Math.floor(ms / 1000);
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }
-  return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
 /**
@@ -164,7 +149,7 @@ function getLocationString(session: ActiveSession): string | null {
 }
 
 export function NowPlayingCard({ session, onPress }: NowPlayingCardProps) {
-  const { serverUrl } = useAuthStore();
+  const getImageUrl = useImageUrl();
   const { isTablet, select } = useResponsive();
   const { title, subtitle } = getMediaDisplay(session);
 
@@ -177,10 +162,12 @@ export function NowPlayingCard({ session, onPress }: NowPlayingCardProps) {
   const avatarSize = select({ base: 16, md: 20 });
 
   // Build poster URL using image proxy (request larger size for tablets)
-  const posterUrl =
-    serverUrl && session.thumbPath
-      ? `${serverUrl}/api/v1/images/proxy?server=${session.serverId}&url=${encodeURIComponent(session.thumbPath)}&width=${posterWidth * 2}&height=${posterHeight * 2}`
-      : null;
+  const posterUrl = getImageUrl({
+    serverId: session.serverId,
+    path: session.thumbPath,
+    width: posterWidth * 2,
+    height: posterHeight * 2,
+  });
 
   const isPaused = session.state === 'paused';
   const username = session.user?.username ?? 'Unknown';
@@ -194,47 +181,58 @@ export function NowPlayingCard({ session, onPress }: NowPlayingCardProps) {
 
   return (
     <Pressable
-      style={({ pressed }) => [styles.container, pressed && styles.pressed]}
+      className="bg-card mb-2 overflow-hidden rounded-xl"
+      style={({ pressed }) => pressed && { opacity: 0.7 }}
       onPress={() => onPress?.(session)}
     >
+      {/* Background with poster blur - matches web's blur-xl */}
+      {posterUrl && (
+        <Image
+          source={{ uri: posterUrl }}
+          style={[StyleSheet.absoluteFill, { opacity: 0.25 }]}
+          blurRadius={40}
+          resizeMode="cover"
+        />
+      )}
+
       {/* Main content row */}
-      <View style={styles.contentRow}>
+      <View className="flex-row items-center px-2 py-1">
         {/* Poster */}
-        <View style={[styles.posterContainer, { marginRight: isTablet ? spacing.md : spacing.sm }]}>
+        <View className="relative" style={{ marginRight: isTablet ? spacing.md : spacing.sm }}>
           {posterUrl ? (
             <Image
               source={{ uri: posterUrl }}
-              style={[styles.poster, { width: posterWidth, height: posterHeight }]}
+              className="bg-card rounded-lg"
+              style={{ width: posterWidth, height: posterHeight }}
               resizeMode="cover"
             />
           ) : (
             <View
-              style={[
-                styles.poster,
-                styles.posterPlaceholder,
-                { width: posterWidth, height: posterHeight },
-              ]}
+              className="bg-card items-center justify-center rounded-lg"
+              style={{ width: posterWidth, height: posterHeight }}
             >
-              <Ionicons
-                name="film-outline"
-                size={isTablet ? 28 : 24}
-                color={colors.text.muted.dark}
-              />
+              <Ionicons name="film-outline" size={isTablet ? 28 : 24} color={colors.icon.default} />
             </View>
           )}
           {/* Paused overlay */}
           {isPaused && (
-            <View style={styles.pausedOverlay}>
+            <View
+              style={StyleSheet.absoluteFill}
+              className="items-center justify-center rounded-lg bg-black/60"
+            >
               <Ionicons name="pause" size={isTablet ? 24 : 20} color={colors.text.primary.dark} />
             </View>
           )}
         </View>
 
         {/* Info section */}
-        <View style={styles.info}>
+        <View className="flex-1 justify-center gap-0.5">
           {/* Title row - with device icon on tablet */}
-          <View style={styles.titleRow}>
-            <Text style={[styles.title, isTablet && styles.titleTablet]} numberOfLines={1}>
+          <View className="flex-row items-center">
+            <Text
+              className={`flex-1 leading-4 font-semibold ${isTablet ? 'text-base leading-5' : 'text-sm'}`}
+              numberOfLines={1}
+            >
               {title}
             </Text>
             {isTablet && (
@@ -247,22 +245,28 @@ export function NowPlayingCard({ session, onPress }: NowPlayingCardProps) {
             )}
           </View>
           {subtitle && (
-            <Text style={[styles.subtitle, isTablet && styles.subtitleTablet]} numberOfLines={1}>
+            <Text
+              className={`text-muted-foreground ${isTablet ? 'text-sm' : 'text-xs'}`}
+              numberOfLines={1}
+            >
               {subtitle}
             </Text>
           )}
 
           {/* User + time row combined */}
-          <View style={styles.userTimeRow}>
-            <View style={styles.userSection}>
+          <View className="mt-0.5 flex-row items-center justify-between">
+            <View className="flex-1 flex-row items-center gap-1">
               <UserAvatar thumbUrl={userThumbUrl} username={username} size={avatarSize} />
-              <Text style={styles.username} numberOfLines={1}>
+              <Text className="text-secondary-foreground text-xs" numberOfLines={1}>
                 {displayName}
               </Text>
               {/* Show quality badge on tablet, just transcode icon on phone */}
               {isTablet ? (
-                <View style={[styles.qualityBadge, { backgroundColor: qualityInfo.bgColor }]}>
-                  <Text style={[styles.qualityText, { color: qualityInfo.color }]}>
+                <View
+                  className="ml-1 rounded px-1.5 py-0.5"
+                  style={{ backgroundColor: qualityInfo.bgColor }}
+                >
+                  <Text className="text-[9px] font-semibold" style={{ color: qualityInfo.color }}>
                     {qualityInfo.label}
                   </Text>
                 </View>
@@ -270,27 +274,32 @@ export function NowPlayingCard({ session, onPress }: NowPlayingCardProps) {
                 session.isTranscode && <Ionicons name="flash" size={10} color={colors.warning} />
               )}
             </View>
-            <View style={styles.timeSection}>
-              <View style={[styles.statusDot, isPaused && styles.statusDotPaused]}>
+            <View className="flex-row items-center gap-1">
+              <View
+                className="h-3 w-3 items-center justify-center rounded-full"
+                style={{
+                  backgroundColor: isPaused ? 'rgba(245, 158, 11, 0.15)' : `${ACCENT_COLOR}15`,
+                }}
+              >
                 <Ionicons
                   name={isPaused ? 'pause' : 'play'}
                   size={6}
-                  color={isPaused ? colors.warning : colors.cyan.core}
+                  color={isPaused ? colors.warning : ACCENT_COLOR}
                 />
               </View>
-              <Text style={[styles.timeText, isPaused && styles.pausedText]}>
+              <Text className={`text-muted-foreground text-xs ${isPaused ? 'text-warning' : ''}`}>
                 {isPaused
                   ? 'Paused'
-                  : `${formatDuration(estimatedProgressMs)} / ${formatDuration(session.totalDurationMs)}`}
+                  : `${formatDuration(estimatedProgressMs, { style: 'clock' })} / ${formatDuration(session.totalDurationMs, { style: 'clock' })}`}
               </Text>
             </View>
           </View>
 
           {/* Location footer - tablet only */}
           {isTablet && location && (
-            <View style={styles.locationRow}>
+            <View className="mt-0.5 flex-row items-center gap-0.5">
               <Ionicons name="location-outline" size={10} color={colors.text.muted.dark} />
-              <Text style={styles.locationText} numberOfLines={1}>
+              <Text className="text-muted-foreground flex-1 text-[10px]" numberOfLines={1}>
                 {location}
               </Text>
             </View>
@@ -298,154 +307,17 @@ export function NowPlayingCard({ session, onPress }: NowPlayingCardProps) {
         </View>
 
         {/* Chevron */}
-        <View style={styles.chevron}>
-          <Ionicons
-            name="chevron-forward"
-            size={isTablet ? 18 : 16}
-            color={colors.text.muted.dark}
-          />
+        <View className="ml-1 opacity-50">
+          <Ionicons name="chevron-forward" size={isTablet ? 18 : 16} color={colors.icon.default} />
         </View>
       </View>
 
       {/* Bottom progress bar - full width */}
-      <View style={styles.progressBar}>
-        <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+      <View style={{ height: 3, backgroundColor: colors.surface.dark }}>
+        <View
+          style={{ height: '100%', width: `${progressPercent}%`, backgroundColor: ACCENT_COLOR }}
+        />
       </View>
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.card.dark,
-    borderRadius: borderRadius.lg,
-    marginBottom: spacing.sm,
-    overflow: 'hidden',
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  contentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  posterContainer: {
-    position: 'relative',
-  },
-  poster: {
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.surface.dark,
-  },
-  posterPlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pausedOverlay: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderRadius: borderRadius.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  info: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: 2,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: '600',
-    color: colors.text.primary.dark,
-    lineHeight: 16,
-    flex: 1,
-  },
-  titleTablet: {
-    fontSize: typography.fontSize.base,
-    lineHeight: 20,
-  },
-  subtitle: {
-    fontSize: typography.fontSize.xs,
-    color: colors.text.muted.dark,
-  },
-  subtitleTablet: {
-    fontSize: typography.fontSize.sm,
-  },
-  userTimeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 2,
-  },
-  userSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    flex: 1,
-  },
-  username: {
-    fontSize: typography.fontSize.xs,
-    color: colors.text.secondary.dark,
-  },
-  qualityBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginLeft: 4,
-  },
-  qualityText: {
-    fontSize: 9,
-    fontWeight: '600',
-  },
-  timeSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: 'rgba(24, 209, 231, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  statusDotPaused: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-  },
-  timeText: {
-    fontSize: typography.fontSize.xs,
-    color: colors.text.muted.dark,
-  },
-  pausedText: {
-    color: colors.warning,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    marginTop: 2,
-  },
-  locationText: {
-    fontSize: 10,
-    color: colors.text.muted.dark,
-    flex: 1,
-  },
-  progressBar: {
-    height: 3,
-    backgroundColor: colors.surface.dark,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: colors.cyan.core,
-  },
-  chevron: {
-    marginLeft: 4,
-    opacity: 0.5,
-  },
-});

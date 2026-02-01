@@ -228,7 +228,12 @@ export function StoragePredictionChart({
           },
           formatter: function () {
             const date = new Date(this.value as number);
-            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            // Include year for longer time periods (year/all) to differentiate labels
+            const options: Intl.DateTimeFormatOptions =
+              period === 'year' || period === 'all'
+                ? { month: 'short', year: '2-digit' }
+                : { month: 'short', day: 'numeric' };
+            return date.toLocaleDateString('en-US', options);
           },
         },
         lineColor: 'hsl(var(--border))',

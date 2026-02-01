@@ -60,37 +60,32 @@ export function ConcurrentChart({
       },
       xAxis: {
         categories: data.map((d) => d.hour),
-        // Calculate appropriate number of labels based on period
-        // Week: 7 labels (one per day), Month: ~10, Year: 12
-        tickPositions: (() => {
-          const numLabels =
-            period === 'week' || period === 'day' ? 7 : period === 'month' ? 10 : 12;
-          const actualLabels = Math.min(numLabels, data.length);
-          return Array.from({ length: actualLabels }, (_, i) =>
-            Math.floor((i * (data.length - 1)) / (actualLabels - 1 || 1))
-          );
-        })(),
         labels: {
           style: {
             color: 'hsl(var(--muted-foreground))',
           },
           formatter: function () {
-            // this.value could be index (number) or category string depending on Highcharts version
             const categories = this.axis.categories;
             const categoryValue =
               typeof this.value === 'number' ? categories[this.value] : this.value;
             if (!categoryValue) return '';
-            const date = new Date(
-              categoryValue.includes('T') ? categoryValue : categoryValue + 'T00:00:00'
-            );
+            // PostgreSQL: "2026-01-28 05:00:00+00" -> JS needs "2026-01-28T05:00:00+00:00"
+            const normalized = categoryValue.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
+            const date = new Date(normalized);
             if (isNaN(date.getTime())) return '';
-            if (period === 'year') {
-              // Short month name for yearly view (Dec, Jan, Feb)
-              return date.toLocaleDateString('en-US', { month: 'short' });
+
+            if (period === 'year' || period === 'all') {
+              return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
             }
-            // M/D format for week/month views
+            if (period === 'day') {
+              // Hourly - show time only
+              return date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+            }
+            // week (6-hour) / month (daily): M/D format
             return `${date.getMonth() + 1}/${date.getDate()}`;
           },
+          // Show ~7 labels for week, ~8 for day, ~12 for others
+          step: Math.ceil(data.length / (period === 'week' ? 7 : period === 'day' ? 8 : 12)),
         },
         lineColor: 'hsl(var(--border))',
         tickColor: 'hsl(var(--border))',
@@ -138,24 +133,38 @@ export function ConcurrentChart({
         shared: true,
         formatter: function () {
           const points = this.points || [];
-          // With categories, this.x is the index. Use the category value from points[0].key
-          const categoryValue = points[0]?.key as string | undefined;
-          const date = categoryValue
-            ? new Date(categoryValue.replace(' ', 'T').replace(/\+\d{2}$/, ''))
-            : null;
-          const dateStr =
-            date && !isNaN(date.getTime())
-              ? `${date.toLocaleDateString()} ${date.getHours()}:00`
-              : 'Unknown';
+          // Get category from axis using x index
+          const categories = points[0]?.series?.xAxis?.categories;
+          const xIndex = typeof this.x === 'number' ? this.x : 0;
+          const categoryValue = categories?.[xIndex];
+          // PostgreSQL: "2026-01-28 05:00:00+00" -> JS needs "2026-01-28T05:00:00+00:00"
+          const normalized = categoryValue?.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
+          const date = normalized ? new Date(normalized) : null;
+
+          let dateStr = 'Unknown';
+          if (date && !isNaN(date.getTime())) {
+            if (period === 'all') {
+              dateStr = `Week of ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+            } else if (period === 'year' || period === 'month') {
+              // Daily buckets - just show date
+              dateStr = date.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              });
+            } else {
+              // day (hourly) or week (6-hour) - show date and time
+              dateStr = `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true })}`;
+            }
+          }
           let html = `<b>${dateStr}</b>`;
 
-          // Calculate total from stacked values
           let total = 0;
           points.forEach((point) => {
             total += point.y || 0;
             html += `<br/><span style="color:${point.color}">●</span> ${point.series.name}: ${point.y}`;
           });
-          html += `<br/><b>Total: ${total}</b>`;
+          html += `<br/><b>Peak Concurrent: ${total}</b>`;
 
           return html;
         },

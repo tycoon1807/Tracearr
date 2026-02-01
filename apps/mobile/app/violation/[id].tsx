@@ -37,7 +37,8 @@ import { Text } from '@/components/ui/text';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { UserAvatar } from '@/components/ui/user-avatar';
-import { colors, spacing } from '@/lib/theme';
+import { ActionResultsList } from '@/components/violations/ActionResultsList';
+import { colors, spacing, ACCENT_COLOR } from '@/lib/theme';
 import { formatSpeed } from '@tracearr/shared';
 import type {
   ViolationWithDetails,
@@ -74,7 +75,20 @@ function getViolationDescription(
   const data = violation.data;
   const ruleType = violation.rule?.type;
 
-  if (!data || !ruleType) return 'Rule violation detected';
+  // V2 rules don't have a type - check for custom message in data
+  if (!ruleType) {
+    // Check if there's a custom message from a log_only action or similar
+    if (data?.message && typeof data.message === 'string') {
+      return data.message;
+    }
+    // Check for rule name as fallback context
+    if (violation.rule?.name) {
+      return `Triggered rule: ${violation.rule.name}`;
+    }
+    return 'Custom rule violation detected';
+  }
+
+  if (!data) return 'Rule violation detected';
 
   switch (ruleType) {
     case 'impossible_travel': {
@@ -182,7 +196,10 @@ function StreamCard({ session, index, isTriggering, userHistory }: StreamCardPro
     .join(', ');
 
   return (
-    <Card className={isTriggering ? 'border-cyan-core/50 bg-surface/50' : ''}>
+    <Card
+      className={isTriggering ? 'bg-surface/50' : ''}
+      style={isTriggering ? { borderColor: `${ACCENT_COLOR}80` } : undefined}
+    >
       {/* Header */}
       <View className="mb-3">
         <View className="mb-1 flex-row items-center gap-2">
@@ -190,8 +207,8 @@ function StreamCard({ session, index, isTriggering, userHistory }: StreamCardPro
             {isTriggering ? 'Triggering Stream' : `Stream #${index + 1}`}
           </Text>
           {isTriggering && (
-            <View className="bg-cyan-core/20 rounded px-1.5 py-0.5">
-              <Text className="text-cyan-core text-xs">Primary</Text>
+            <View className="bg-primary/20 rounded px-1.5 py-0.5">
+              <Text className="text-primary text-xs">Primary</Text>
             </View>
           )}
         </View>
@@ -423,15 +440,14 @@ export default function ViolationDetailScreen() {
         edges={['left', 'right', 'bottom']}
       >
         <View className="flex-1 items-center justify-center px-8">
-          <AlertTriangle size={48} color={colors.text.muted.dark} />
-          <Text className="mt-4 text-center text-xl font-semibold">Violation Not Found</Text>
-          <Text className="text-muted-foreground mt-2 text-center">
+          <View className="bg-card border-border mb-4 h-20 w-20 items-center justify-center rounded-full border">
+            <AlertTriangle size={32} color={colors.text.muted.dark} />
+          </View>
+          <Text className="mb-1 text-center text-xl font-semibold">Violation Not Found</Text>
+          <Text className="text-muted-foreground text-center text-sm">
             This violation may have been dismissed or is no longer available.
           </Text>
-          <Pressable
-            className="bg-cyan-core mt-6 rounded-lg px-6 py-3"
-            onPress={() => router.back()}
-          >
+          <Pressable className="bg-primary mt-6 rounded-lg px-6 py-3" onPress={() => router.back()}>
             <Text className="font-semibold text-white">Go Back</Text>
           </Pressable>
         </View>
@@ -483,13 +499,13 @@ export default function ViolationDetailScreen() {
         {/* Rule Info */}
         <Card className="mb-4">
           <View className="mb-3 flex-row items-center gap-3">
-            <View className="bg-cyan-core/15 h-10 w-10 items-center justify-center rounded-lg">
-              <IconComponent size={20} color={colors.cyan.core} />
+            <View className="bg-primary/15 h-10 w-10 items-center justify-center rounded-lg">
+              <IconComponent size={20} color={ACCENT_COLOR} />
             </View>
             <View className="flex-1">
               <Text className="text-base font-semibold">{violation.rule?.name || ruleName}</Text>
               <Text className="text-muted-foreground text-sm capitalize">
-                {ruleType?.replace(/_/g, ' ') || 'Unknown type'}
+                {ruleType?.replace(/_/g, ' ') || 'Custom Rule'}
               </Text>
             </View>
           </View>
@@ -557,6 +573,13 @@ export default function ViolationDetailScreen() {
           </View>
         )}
 
+        {/* Action Results (V2 Rules) */}
+        {violation.actionResults && violation.actionResults.length > 0 && (
+          <Card className="mb-4">
+            <ActionResultsList results={violation.actionResults} />
+          </Card>
+        )}
+
         {/* Timestamps */}
         <Card className="mb-4">
           <View className="gap-3">
@@ -590,7 +613,7 @@ export default function ViolationDetailScreen() {
         <View style={{ flexDirection: isTablet ? 'row' : 'column', gap: spacing.sm }}>
           {isPending && (
             <Pressable
-              className="bg-cyan-core flex-1 flex-row items-center justify-center gap-2 rounded-lg py-3.5"
+              className="bg-primary flex-1 flex-row items-center justify-center gap-2 rounded-lg py-3.5"
               onPress={handleAcknowledge}
               disabled={acknowledgeMutation.isPending}
             >

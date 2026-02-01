@@ -80,10 +80,12 @@ export function QualityTimelineChart({
               categoryValue.includes('T') ? categoryValue : categoryValue + 'T00:00:00'
             );
             if (isNaN(date.getTime())) return '';
-            if (period === '1y' || period === 'year') {
-              return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            }
-            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            // Include year for longer time periods to differentiate labels
+            const options: Intl.DateTimeFormatOptions =
+              period === '1y' || period === 'year' || period === 'all'
+                ? { month: 'short', year: '2-digit' }
+                : { month: 'short', day: 'numeric' };
+            return date.toLocaleDateString('en-US', options);
           },
           rotation: 0,
           // Show ~6-8 labels regardless of data density

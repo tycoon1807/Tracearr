@@ -144,7 +144,15 @@ export interface AuthUser {
 export type SessionState = 'playing' | 'paused' | 'stopped';
 
 /** Supported media types */
-export const MEDIA_TYPES = ['movie', 'episode', 'track', 'live', 'photo', 'trailer', 'unknown'] as const;
+export const MEDIA_TYPES = [
+  'movie',
+  'episode',
+  'track',
+  'live',
+  'photo',
+  'trailer',
+  'unknown',
+] as const;
 export type MediaType = (typeof MEDIA_TYPES)[number];
 
 // ============================================================================
@@ -398,12 +406,203 @@ export type RuleParams =
 export interface Rule {
   id: string;
   name: string;
-  type: RuleType;
-  params: RuleParams;
+  // V1 fields (legacy, nullable for V2 rules)
+  type: RuleType | null;
+  params: RuleParams | null;
+  // V2 fields (nullable for V1 rules)
+  description?: string | null;
+  conditions?: RuleConditions | null;
+  actions?: RuleActions | null;
+  serverId?: string | null;
+  // Common fields
   serverUserId: string | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+// ============================================
+// Rules Builder V2 - Condition/Action System
+// ============================================
+
+// Condition operators
+export type ComparisonOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte';
+export type ArrayOperator = 'in' | 'not_in';
+export type StringOperator = 'contains' | 'not_contains';
+export type Operator = ComparisonOperator | ArrayOperator | StringOperator;
+
+// Condition field categories
+export type SessionBehaviorField =
+  | 'concurrent_streams'
+  | 'active_session_distance_km'
+  | 'travel_speed_kmh'
+  | 'unique_ips_in_window'
+  | 'unique_devices_in_window'
+  | 'inactive_days';
+
+export type StreamQualityField =
+  | 'source_resolution'
+  | 'output_resolution'
+  | 'is_transcoding'
+  | 'is_transcode_downgrade'
+  | 'source_bitrate_mbps';
+
+export type UserAttributeField = 'user_id' | 'trust_score' | 'account_age_days';
+
+export type DeviceClientField = 'device_type' | 'client_name' | 'platform';
+
+export type NetworkLocationField = 'is_local_network' | 'country' | 'ip_in_range';
+
+export type ScopeField = 'server_id' | 'library_id' | 'media_type';
+
+export type ConditionField =
+  | SessionBehaviorField
+  | StreamQualityField
+  | UserAttributeField
+  | DeviceClientField
+  | NetworkLocationField
+  | ScopeField;
+
+// Resolution enum for stream quality
+export type VideoResolution = '4K' | '1080p' | '720p' | '480p' | 'SD' | 'unknown';
+
+// Device type enum
+export type DeviceType = 'mobile' | 'tablet' | 'tv' | 'desktop' | 'browser' | 'unknown';
+
+// Platform enum
+export type Platform =
+  | 'ios'
+  | 'android'
+  | 'windows'
+  | 'macos'
+  | 'linux'
+  | 'tvos'
+  | 'androidtv'
+  | 'roku'
+  | 'webos'
+  | 'tizen'
+  | 'unknown';
+
+// Media type enum (already exists but adding for clarity)
+export type MediaTypeEnum = 'movie' | 'episode' | 'track' | 'photo' | 'live' | 'trailer';
+
+// Condition value types
+export type ConditionValue = string | number | boolean | string[] | number[];
+
+// Single condition
+export interface Condition {
+  field: ConditionField;
+  operator: Operator;
+  value: ConditionValue;
+  params?: {
+    window_hours?: number; // for velocity checks
+  };
+}
+
+// Condition group (OR logic within group)
+export interface ConditionGroup {
+  conditions: Condition[];
+}
+
+// Rule conditions (AND logic between groups)
+export interface RuleConditions {
+  groups: ConditionGroup[];
+}
+
+// Action types
+export type ActionType =
+  | 'create_violation'
+  | 'log_only'
+  | 'notify'
+  | 'adjust_trust'
+  | 'set_trust'
+  | 'reset_trust'
+  | 'kill_stream'
+  | 'message_client';
+
+// Notification channels
+export type NotificationChannelV2 = 'push' | 'discord' | 'email' | 'webhook';
+
+// Action definitions
+export interface CreateViolationAction {
+  type: 'create_violation';
+  severity: ViolationSeverity;
+  cooldown_minutes?: number;
+}
+
+export interface LogOnlyAction {
+  type: 'log_only';
+  message?: string;
+}
+
+export interface NotifyAction {
+  type: 'notify';
+  channels: NotificationChannelV2[];
+  cooldown_minutes?: number;
+}
+
+export interface AdjustTrustAction {
+  type: 'adjust_trust';
+  amount: number; // positive or negative
+}
+
+export interface SetTrustAction {
+  type: 'set_trust';
+  value: number;
+}
+
+export interface ResetTrustAction {
+  type: 'reset_trust';
+}
+
+export interface KillStreamAction {
+  type: 'kill_stream';
+  delay_seconds?: number;
+  require_confirmation?: boolean;
+  cooldown_minutes?: number;
+}
+
+export interface MessageClientAction {
+  type: 'message_client';
+  message: string;
+}
+
+export type Action =
+  | CreateViolationAction
+  | LogOnlyAction
+  | NotifyAction
+  | AdjustTrustAction
+  | SetTrustAction
+  | ResetTrustAction
+  | KillStreamAction
+  | MessageClientAction;
+
+// Rule actions container
+export interface RuleActions {
+  actions: Action[];
+}
+
+// New Rule interface (V2)
+export interface RuleV2 {
+  id: string;
+  name: string;
+  description: string | null;
+  serverId: string | null;
+  isActive: boolean;
+  conditions: RuleConditions;
+  actions: RuleActions;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Action result types (for UI display of action execution results)
+export interface ActionResult {
+  actionType: string;
+  success: boolean;
+  skipped?: boolean;
+  skipReason?: string;
+  errorMessage?: string;
+  executedAt?: string;
 }
 
 // Violation types
@@ -447,7 +646,8 @@ export interface ViolationSessionInfo {
 }
 
 export interface ViolationWithDetails extends Violation {
-  rule: Pick<Rule, 'id' | 'name' | 'type'>;
+  // type is optional to support V2 rules which don't have a type field
+  rule: Pick<Rule, 'id' | 'name'> & { type: RuleType | null };
   user: Pick<ServerUser, 'id' | 'username' | 'thumbUrl' | 'serverId'> & {
     identityName: string | null;
   };
@@ -459,6 +659,8 @@ export interface ViolationWithDetails extends Violation {
     previousDevices: string[];
     previousLocations: Array<{ city: string | null; country: string | null; ip: string }>;
   };
+  /** Action results from V2 rule execution */
+  actionResults?: ActionResult[];
 }
 
 // Stats types
@@ -641,9 +843,16 @@ export interface Settings {
   primaryAuthMethod: 'jellyfin' | 'local';
 }
 
+// Heavy operations lock info (for "Waiting for X" display)
+export interface HeavyOpsWaitingFor {
+  jobType: 'import' | 'maintenance';
+  description: string;
+  startedAt: string;
+}
+
 // Tautulli import types
 export interface TautulliImportProgress {
-  status: 'idle' | 'fetching' | 'processing' | 'complete' | 'error';
+  status: 'idle' | 'waiting' | 'fetching' | 'processing' | 'complete' | 'error';
   /** Expected total from API (may differ from actual if API count is stale) */
   totalRecords: number;
   /** Actual records fetched from API so far */
@@ -667,6 +876,8 @@ export interface TautulliImportProgress {
   currentPage: number;
   totalPages: number;
   message: string;
+  /** Present when status='waiting' - what this job is waiting for */
+  waitingFor?: HeavyOpsWaitingFor;
 }
 
 export interface TautulliImportResult {
@@ -688,7 +899,7 @@ export interface TautulliImportResult {
 
 // Jellystat import types
 export interface JellystatImportProgress {
-  status: 'idle' | 'parsing' | 'enriching' | 'processing' | 'complete' | 'error';
+  status: 'idle' | 'waiting' | 'parsing' | 'enriching' | 'processing' | 'complete' | 'error';
   totalRecords: number;
   processedRecords: number;
   importedRecords: number;
@@ -698,6 +909,8 @@ export interface JellystatImportProgress {
   enrichedRecords: number;
   /** Current phase message */
   message: string;
+  /** Present when status='waiting' - what this job is waiting for */
+  waitingFor?: HeavyOpsWaitingFor;
 }
 
 export interface JellystatImportResult {
@@ -848,6 +1061,25 @@ export interface UserFilterOption {
 }
 
 /**
+ * Server option for server filter dropdown.
+ */
+export interface ServerFilterOption {
+  id: string;
+  name: string;
+  type: 'plex' | 'jellyfin' | 'emby';
+}
+
+/**
+ * Country option with session activity indicator.
+ * Used when includeAllCountries=true for rules builder.
+ */
+export interface CountryOption {
+  code: string;
+  name: string;
+  hasSessions: boolean;
+}
+
+/**
  * Available filter options for the history page.
  * Returned by GET /sessions/filter-options to populate dropdowns.
  */
@@ -858,12 +1090,25 @@ export interface HistoryFilterOptions {
   products: FilterOptionItem[];
   /** Available device types (iPhone, Android TV, etc.) */
   devices: FilterOptionItem[];
-  /** Available countries */
+  /** Available countries (codes with session count) */
   countries: FilterOptionItem[];
   /** Available cities */
   cities: FilterOptionItem[];
   /** Available users (with avatar info) */
   users: UserFilterOption[];
+  /** Available servers (optional, included when requested) */
+  servers?: ServerFilterOption[];
+}
+
+/**
+ * Extended filter options for rules builder.
+ * Includes all countries with session indicators and servers.
+ */
+export interface RulesFilterOptions extends Omit<HistoryFilterOptions, 'countries'> {
+  /** All countries with session activity indicator */
+  countries: CountryOption[];
+  /** Available servers */
+  servers: ServerFilterOption[];
 }
 
 export interface ApiError {
@@ -1245,6 +1490,8 @@ export interface UnlinkPlexAccountResponse {
 // Maintenance Job Types
 // =============================================================================
 
+export type MaintenanceJobCategory = 'normalization' | 'backfill' | 'cleanup';
+
 export type MaintenanceJobType =
   | 'normalize_players'
   | 'normalize_countries'
@@ -1252,9 +1499,11 @@ export type MaintenanceJobType =
   | 'rebuild_timescale_views'
   | 'normalize_codecs'
   | 'backfill_user_dates'
-  | 'backfill_library_snapshots';
+  | 'backfill_library_snapshots'
+  | 'cleanup_old_chunks'
+  | 'full_aggregate_rebuild';
 
-export type MaintenanceJobStatus = 'idle' | 'running' | 'complete' | 'error';
+export type MaintenanceJobStatus = 'idle' | 'waiting' | 'running' | 'complete' | 'error';
 
 export interface MaintenanceJobProgress {
   type: MaintenanceJobType;
@@ -1267,6 +1516,8 @@ export interface MaintenanceJobProgress {
   message: string;
   startedAt?: string;
   completedAt?: string;
+  /** Present when status='waiting' - what this job is waiting for */
+  waitingFor?: HeavyOpsWaitingFor;
 }
 
 export interface MaintenanceJobResult {
@@ -1298,7 +1549,7 @@ export interface RunningTask {
   /** Human-readable task name */
   name: string;
   /** Current status */
-  status: 'pending' | 'running' | 'complete' | 'error';
+  status: 'pending' | 'waiting' | 'running' | 'complete' | 'error';
   /** Progress percentage (0-100), null if indeterminate */
   progress: number | null;
   /** Current status message */
@@ -1307,6 +1558,8 @@ export interface RunningTask {
   startedAt: string;
   /** Additional context (e.g., server name, job type) */
   context?: string;
+  /** What the task is waiting for (only when status is 'waiting') */
+  waitingFor?: HeavyOpsWaitingFor;
 }
 
 export interface RunningTasksResponse {

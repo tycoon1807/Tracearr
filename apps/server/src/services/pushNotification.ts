@@ -523,7 +523,9 @@ export class PushNotificationService {
       if (severityNum < s.violationMinSeverity) return false;
 
       // Check rule type filter (empty array = all types)
+      // V2 rules have null type - they pass through if array is empty or includes null
       if (s.violationRuleTypes && s.violationRuleTypes.length > 0) {
+        if (violation.rule.type === null) return false; // V2 rules don't match legacy type filters
         if (!s.violationRuleTypes.includes(violation.rule.type)) return false;
       }
 
@@ -828,6 +830,42 @@ export class PushNotificationService {
       syncType: 'sessions',
       timestamp: Date.now(),
     });
+  }
+
+  /**
+   * Send a test notification to verify push is working for a specific device
+   */
+  async sendTestNotification(expoPushToken: string): Promise<{ success: boolean; error?: string }> {
+    if (!Expo.isExpoPushToken(expoPushToken)) {
+      return { success: false, error: 'Invalid push token format' };
+    }
+
+    const message: ExpoPushMessage = {
+      to: expoPushToken,
+      title: 'Tracearr',
+      body: 'Test notification received successfully!',
+      data: { type: 'test' },
+      sound: 'default',
+      priority: 'high',
+    };
+
+    try {
+      const tickets = await expo.sendPushNotificationsAsync([message]);
+      const ticket = tickets[0];
+
+      if (!ticket) {
+        return { success: false, error: 'No response from Expo' };
+      }
+
+      if (ticket.status === 'error') {
+        return { success: false, error: ticket.message ?? 'Push failed' };
+      }
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, error: errorMessage };
+    }
   }
 
   /**

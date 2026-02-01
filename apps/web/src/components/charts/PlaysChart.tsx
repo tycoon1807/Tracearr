@@ -43,23 +43,27 @@ export function PlaysChart({ data, isLoading, height = 200, period = 'month' }: 
             color: 'hsl(var(--muted-foreground))',
           },
           formatter: function () {
-            // this.value could be index (number) or category string depending on Highcharts version
             const categories = this.axis.categories;
             const categoryValue =
               typeof this.value === 'number' ? categories[this.value] : this.value;
             if (!categoryValue) return '';
-            const date = new Date(
-              categoryValue.includes('T') ? categoryValue : categoryValue + 'T00:00:00'
-            );
+            // Handle PostgreSQL timestamp: "2026-01-28 05:00:00" or date "2026-01-28"
+            const normalized = categoryValue.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
+            const date = new Date(normalized.includes('T') ? normalized : normalized + 'T00:00:00');
             if (isNaN(date.getTime())) return '';
-            if (period === 'year') {
-              // Short month name for yearly view (Dec, Jan, Feb)
-              return date.toLocaleDateString('en-US', { month: 'short' });
+
+            if (period === 'year' || period === 'all') {
+              return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
             }
-            // M/D format for week/month views
+            if (period === 'day') {
+              // Hourly - show time only
+              return date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+            }
+            // week (6-hour) / month (daily): M/D format
             return `${date.getMonth() + 1}/${date.getDate()}`;
           },
-          step: Math.ceil(data.length / 12), // Show ~12 labels
+          // Show ~7 labels for week, ~8 for day, ~12 for others
+          step: Math.ceil(data.length / (period === 'week' ? 7 : period === 'day' ? 8 : 12)),
         },
         lineColor: 'hsl(var(--border))',
         tickColor: 'hsl(var(--border))',
@@ -111,20 +115,30 @@ export function PlaysChart({ data, isLoading, height = 200, period = 'month' }: 
           color: 'hsl(var(--popover-foreground))',
         },
         formatter: function () {
-          // With categories, this.x is the index. Use this.point.category for the actual value
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const categoryValue = (this as any).point?.category as string | undefined;
-          const date = categoryValue
-            ? new Date(categoryValue.includes('T') ? categoryValue : categoryValue + 'T00:00:00')
+          // Handle PostgreSQL timestamp: "2026-01-28 05:00:00" or date "2026-01-28"
+          const normalized = categoryValue?.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
+          const date = normalized
+            ? new Date(normalized.includes('T') ? normalized : normalized + 'T00:00:00')
             : null;
-          const dateStr =
-            date && !isNaN(date.getTime())
-              ? date.toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })
-              : 'Unknown';
+
+          let dateStr = 'Unknown';
+          if (date && !isNaN(date.getTime())) {
+            if (period === 'all') {
+              dateStr = `Week of ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+            } else if (period === 'year' || period === 'month') {
+              // Daily buckets - just show date
+              dateStr = date.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              });
+            } else {
+              // day (hourly) or week (6-hour) - show date and time
+              dateStr = `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true })}`;
+            }
+          }
           return `<b>${dateStr}</b><br/>Plays: ${this.y}`;
         },
       },

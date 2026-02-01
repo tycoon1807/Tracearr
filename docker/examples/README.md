@@ -14,11 +14,11 @@ Ready-to-use Docker Compose files for deploying Tracearr via **Portainer**, **Pr
 
 ---
 
-## Supervised (Recommended for Most Users)
+## Supervised (Bare Metal Only)
 
 **File:** `docker-compose.supervised-example.yml`
 
-Single container with TimescaleDB, Redis, and Tracearr bundled. Best for home servers and simple deployments.
+Single container with TimescaleDB, Redis, and Tracearr bundled. **Designed for Unraid and intended for bare metal hosts only** — not recommended for VMs or nested containers.
 
 | Pros                                       | Cons                                                    |
 | ------------------------------------------ | ------------------------------------------------------- |

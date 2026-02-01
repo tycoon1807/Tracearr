@@ -21,8 +21,15 @@ import {
   type HistorySessionResponse,
   type HistoryAggregates,
   type HistoryFilterOptions,
+  type RulesFilterOptions,
+  type CountryOption,
   type HistoryAggregatesQueryInput,
 } from '@tracearr/shared';
+import countries from 'i18n-iso-countries';
+import countriesEn from 'i18n-iso-countries/langs/en.json' with { type: 'json' };
+
+// Register English locale for country name lookups
+countries.registerLocale(countriesEn);
 import { db } from '../db/client.js';
 import { sessions, serverUsers, servers, users } from '../db/schema.js';
 import { filterByServerAccess, hasServerAccess } from '../utils/serverFiltering.js';
@@ -892,17 +899,27 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
    * GET /sessions/filter-options - Get available filter values for dropdowns
    *
    * Returns distinct values for platforms, products, devices, countries, cities,
-   * and users to populate filter dropdowns on the History page.
+   * users, and optionally servers to populate filter dropdowns.
+   *
+   * Query params:
+   * - serverId: Filter by specific server
+   * - startDate: Filter by start date (ISO 8601)
+   * - endDate: Filter by end date (ISO 8601)
+   * - includeAllCountries: When true, returns all countries with hasSessions indicator
+   *                        (for rules builder). When false/omitted, returns only
+   *                        countries with sessions (for history page).
    */
   app.get('/filter-options', { preHandler: [app.authenticate] }, async (request, reply) => {
     const query = request.query as {
       serverId?: string;
       startDate?: string;
       endDate?: string;
+      includeAllCountries?: string;
     };
     const serverId = query.serverId;
     const startDate = query.startDate ? new Date(query.startDate) : undefined;
     const endDate = query.endDate ? new Date(query.endDate) : undefined;
+    const includeAllCountries = query.includeAllCountries === 'true';
 
     if (startDate && isNaN(startDate.getTime())) {
       return reply.badRequest('Invalid startDate format. Use ISO 8601 format.');
@@ -925,6 +942,19 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       serverConditions.push(sql`s.server_id = ${serverId}`);
     } else if (authUser.role !== 'owner') {
       if (authUser.serverIds.length === 0) {
+        // Return empty response for users with no server access
+        if (includeAllCountries) {
+          const emptyRulesResponse: RulesFilterOptions = {
+            platforms: [],
+            products: [],
+            devices: [],
+            countries: [],
+            cities: [],
+            users: [],
+            servers: [],
+          };
+          return emptyRulesResponse;
+        }
         const emptyResponse: HistoryFilterOptions = {
           platforms: [],
           products: [],
@@ -969,6 +999,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       countriesResult,
       citiesResult,
       usersResult,
+      serversResult,
     ] = await Promise.all([
       // Platforms
       db.execute(sql`
@@ -997,7 +1028,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
             ORDER BY count DESC
             LIMIT 50
           `),
-      // Countries
+      // Countries (codes with session count)
       db.execute(sql`
             SELECT geo_country as value, COUNT(DISTINCT COALESCE(reference_id, id))::int as count
             FROM sessions s
@@ -1029,27 +1060,77 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
             ORDER BY su.username
             LIMIT 200
           `),
+      // Servers (for rules builder)
+      db.select({ id: servers.id, name: servers.name, type: servers.type }).from(servers),
     ]);
 
+    // Transform users result
+    const usersData = (
+      usersResult.rows as unknown as {
+        id: string;
+        username: string;
+        thumb_url: string | null;
+        identity_name: string | null;
+      }[]
+    ).map((row) => ({
+      id: row.id,
+      username: row.username,
+      thumbUrl: row.thumb_url,
+      identityName: row.identity_name,
+    }));
+
+    // Transform servers result
+    const serversData = serversResult.map((row) => ({
+      id: row.id,
+      name: row.name,
+      type: row.type,
+    }));
+
+    // Get countries that have sessions
+    const countriesWithSessions = new Set(
+      (countriesResult.rows as { value: string }[]).map((r) => r.value)
+    );
+
+    // When includeAllCountries is true, return all countries with hasSessions indicator
+    if (includeAllCountries) {
+      // Get all country codes and names from i18n-iso-countries
+      const allCountryNames = countries.getNames('en');
+      const allCountries: CountryOption[] = Object.entries(allCountryNames)
+        .map(([code, name]) => ({
+          code,
+          name,
+          hasSessions: countriesWithSessions.has(code),
+        }))
+        .sort((a, b) => {
+          // Sort: countries with sessions first, then alphabetically by name
+          if (a.hasSessions !== b.hasSessions) {
+            return a.hasSessions ? -1 : 1;
+          }
+          return a.name.localeCompare(b.name);
+        });
+
+      const rulesResponse: RulesFilterOptions = {
+        platforms: platformsResult.rows as unknown as HistoryFilterOptions['platforms'],
+        products: productsResult.rows as unknown as HistoryFilterOptions['products'],
+        devices: devicesResult.rows as unknown as HistoryFilterOptions['devices'],
+        countries: allCountries,
+        cities: citiesResult.rows as unknown as HistoryFilterOptions['cities'],
+        users: usersData,
+        servers: serversData,
+      };
+
+      return rulesResponse;
+    }
+
+    // Default response for history page (only countries with sessions)
     const response: HistoryFilterOptions = {
       platforms: platformsResult.rows as unknown as HistoryFilterOptions['platforms'],
       products: productsResult.rows as unknown as HistoryFilterOptions['products'],
       devices: devicesResult.rows as unknown as HistoryFilterOptions['devices'],
       countries: countriesResult.rows as unknown as HistoryFilterOptions['countries'],
       cities: citiesResult.rows as unknown as HistoryFilterOptions['cities'],
-      users: (
-        usersResult.rows as unknown as {
-          id: string;
-          username: string;
-          thumb_url: string | null;
-          identity_name: string | null;
-        }[]
-      ).map((row) => ({
-        id: row.id,
-        username: row.username,
-        thumbUrl: row.thumb_url,
-        identityName: row.identity_name,
-      })),
+      users: usersData,
+      servers: serversData,
     };
 
     return response;

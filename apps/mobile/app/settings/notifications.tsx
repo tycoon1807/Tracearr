@@ -17,6 +17,10 @@ import {
   ServerCog,
   Moon,
   Flame,
+  MapPin,
+  Users,
+  Zap,
+  Globe,
   type LucideIcon,
 } from 'lucide-react-native';
 import { Text } from '@/components/ui/text';
@@ -24,25 +28,25 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
-import { useAuthStore } from '@/lib/authStore';
-import { colors } from '@/lib/theme';
+import { useAuthStateStore } from '@/lib/authStateStore';
+import { colors, ACCENT_COLOR } from '@/lib/theme';
 import type { NotificationPreferences } from '@tracearr/shared';
 
-// Rule types for violation filtering
-const RULE_TYPES = [
-  { value: 'impossible_travel', label: 'Impossible Travel' },
-  { value: 'simultaneous_locations', label: 'Simultaneous Locations' },
-  { value: 'device_velocity', label: 'Device Velocity' },
-  { value: 'concurrent_streams', label: 'Concurrent Streams' },
-  { value: 'geo_restriction', label: 'Geo Restriction' },
-] as const;
+// Rule types for violation filtering with icons
+const RULE_TYPES: { value: string; label: string; icon: LucideIcon }[] = [
+  { value: 'impossible_travel', label: 'Impossible Travel', icon: MapPin },
+  { value: 'simultaneous_locations', label: 'Simultaneous Locations', icon: Users },
+  { value: 'device_velocity', label: 'Device Velocity', icon: Zap },
+  { value: 'concurrent_streams', label: 'Concurrent Streams', icon: Monitor },
+  { value: 'geo_restriction', label: 'Geo Restriction', icon: Globe },
+];
 
-// Severity levels
-const SEVERITY_LEVELS = [
-  { value: 1, label: 'All (Low, Warning, High)' },
-  { value: 2, label: 'Warning & High only' },
-  { value: 3, label: 'High severity only' },
-] as const;
+// Severity levels for segmented control
+const SEVERITY_OPTIONS: { value: string; label: string }[] = [
+  { value: '1', label: 'All' },
+  { value: '2', label: 'Warning+' },
+  { value: '3', label: 'High Only' },
+];
 
 function Divider() {
   return <View className="bg-border ml-4 h-px" />;
@@ -110,109 +114,53 @@ function SettingRow({
   );
 }
 
-function SelectRow({
-  label,
+// Segmented control matching Alerts page pattern
+function SegmentedControl<T extends string>({
+  options,
   value,
-  options,
   onChange,
-  disabled,
 }: {
-  label: string;
-  value: number;
-  options: ReadonlyArray<{ value: number; label: string }>;
-  onChange: (value: number) => void;
-  disabled?: boolean;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
 }) {
-  const currentOption = options.find((o) => o.value === value);
-
-  const handlePress = () => {
-    if (disabled) return;
-
-    Alert.alert(
-      label,
-      undefined,
-      options.map((option) => ({
-        text: option.label,
-        onPress: () => onChange(option.value),
-        style: option.value === value ? 'cancel' : 'default',
-      }))
-    );
-  };
-
   return (
-    <Pressable
-      onPress={handlePress}
-      disabled={disabled}
-      className={cn('min-h-[52px] px-4 py-3', 'active:opacity-70')}
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: colors.surface.dark,
+        borderRadius: 8,
+        padding: 4,
+      }}
     >
-      <Text className={cn('text-muted-foreground mb-1 text-sm', disabled && 'opacity-50')}>
-        {label}
-      </Text>
-      <Text className={cn('text-base', disabled && 'opacity-50')}>
-        {currentOption?.label ?? 'Select...'}
-      </Text>
-    </Pressable>
-  );
-}
-
-function MultiSelectRow({
-  selectedValues,
-  options,
-  onChange,
-  disabled,
-}: {
-  selectedValues: string[];
-  options: ReadonlyArray<{ value: string; label: string }>;
-  onChange: (values: string[]) => void;
-  disabled?: boolean;
-}) {
-  const toggleValue = (value: string) => {
-    if (disabled) return;
-    if (selectedValues.includes(value)) {
-      onChange(selectedValues.filter((v) => v !== value));
-    } else {
-      onChange([...selectedValues, value]);
-    }
-  };
-
-  const allSelected = selectedValues.length === 0;
-
-  return (
-    <View className="px-4 py-3">
-      <View className="flex-row flex-wrap gap-2.5">
-        <Pressable
-          onPress={() => onChange([])}
-          disabled={disabled}
-          className={cn(
-            'rounded-full border px-3 py-1.5',
-            allSelected ? 'bg-cyan-core border-cyan-core' : 'border-border bg-card',
-            disabled && 'opacity-50'
-          )}
-        >
-          <Text className={cn('text-sm', allSelected ? 'text-background' : 'text-foreground')}>
-            All Types
-          </Text>
-        </Pressable>
-        {options.map((option) => {
-          const isSelected = selectedValues.includes(option.value);
-          return (
-            <Pressable
-              key={option.value}
-              onPress={() => toggleValue(option.value)}
-              disabled={disabled}
-              className={cn(
-                'rounded-full border px-3 py-1.5',
-                isSelected ? 'bg-cyan-core border-cyan-core' : 'border-border bg-card',
-                disabled && 'opacity-50'
-              )}
+      {options.map((option) => {
+        const isSelected = value === option.value;
+        return (
+          <Pressable
+            key={option.value}
+            onPress={() => onChange(option.value)}
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              borderRadius: 6,
+              backgroundColor: isSelected ? colors.card.dark : 'transparent',
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: '600',
+                color: isSelected ? colors.text.primary.dark : colors.text.muted.dark,
+              }}
             >
-              <Text className={cn('text-sm', isSelected ? 'text-background' : 'text-foreground')}>
-                {option.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -251,7 +199,7 @@ function RateLimitStatus({
 
 export default function NotificationSettingsScreen() {
   const queryClient = useQueryClient();
-  const { activeServerId } = useAuthStore();
+  const server = useAuthStateStore((s) => s.server);
 
   // Fetch current preferences (per-device, not per-server)
   const {
@@ -261,7 +209,7 @@ export default function NotificationSettingsScreen() {
   } = useQuery({
     queryKey: ['notifications', 'preferences'],
     queryFn: api.notifications.getPreferences,
-    enabled: !!activeServerId, // Still need auth
+    enabled: !!server, // Still need auth
   });
 
   // Update mutation with optimistic updates
@@ -314,7 +262,7 @@ export default function NotificationSettingsScreen() {
         edges={['left', 'right', 'bottom']}
       >
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color={colors.cyan.core} />
+          <ActivityIndicator size="large" color={ACCENT_COLOR} />
           <Text className="text-muted-foreground mt-4">Loading preferences...</Text>
         </View>
       </SafeAreaView>
@@ -344,7 +292,7 @@ export default function NotificationSettingsScreen() {
       style={{ flex: 1, backgroundColor: colors.background.dark }}
       edges={['left', 'right', 'bottom']}
     >
-      <ScrollView className="flex-1" contentContainerClassName="p-4">
+      <ScrollView style={{ flex: 1 }} contentContainerClassName="p-4">
         {/* Master Toggle */}
         <SettingsSection title="Push Notifications">
           <SettingRow
@@ -433,20 +381,70 @@ export default function NotificationSettingsScreen() {
 
         {/* Violation Filters - Only show if violation notifications are enabled */}
         {pushEnabled && preferences.onViolationDetected && (
-          <SettingsSection title="Violation Filters">
-            <MultiSelectRow
-              selectedValues={preferences.violationRuleTypes}
-              options={RULE_TYPES}
-              onChange={(values) => handleUpdate('violationRuleTypes', values)}
-            />
-            <Divider />
-            <SelectRow
-              label="Minimum Severity"
-              value={preferences.violationMinSeverity}
-              options={SEVERITY_LEVELS}
-              onChange={(value) => handleUpdate('violationMinSeverity', value)}
-            />
-          </SettingsSection>
+          <>
+            <SettingsSection title="Violation Types">
+              <SettingRow
+                icon={ShieldAlert}
+                label="All Violation Types"
+                description="Notify for every rule type"
+                value={preferences.violationRuleTypes.length === 0}
+                onValueChange={(allEnabled) => {
+                  if (allEnabled) {
+                    handleUpdate('violationRuleTypes', []);
+                  } else {
+                    // When turning off "All", enable all individual types
+                    handleUpdate(
+                      'violationRuleTypes',
+                      RULE_TYPES.map((r) => r.value)
+                    );
+                  }
+                }}
+              />
+              {preferences.violationRuleTypes.length > 0 && (
+                <>
+                  {RULE_TYPES.map((ruleType) => {
+                    const isEnabled = preferences.violationRuleTypes.includes(ruleType.value);
+                    return (
+                      <View key={ruleType.value}>
+                        <Divider />
+                        <SettingRow
+                          icon={ruleType.icon}
+                          label={ruleType.label}
+                          value={isEnabled}
+                          onValueChange={(enabled) => {
+                            const current = preferences.violationRuleTypes;
+                            if (enabled) {
+                              handleUpdate('violationRuleTypes', [...current, ruleType.value]);
+                            } else {
+                              const updated = current.filter((v) => v !== ruleType.value);
+                              // If none left, keep at least one or revert to all
+                              handleUpdate(
+                                'violationRuleTypes',
+                                updated.length === 0 ? [] : updated
+                              );
+                            }
+                          }}
+                        />
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+            </SettingsSection>
+
+            <SettingsSection title="Minimum Severity">
+              <View className="px-4 py-3">
+                <SegmentedControl
+                  options={SEVERITY_OPTIONS}
+                  value={String(preferences.violationMinSeverity)}
+                  onChange={(value) => handleUpdate('violationMinSeverity', Number(value))}
+                />
+                <Text className="text-muted-foreground mt-2 text-xs">
+                  Only notify for violations at or above this severity level
+                </Text>
+              </View>
+            </SettingsSection>
+          </>
         )}
 
         {/* Quiet Hours */}

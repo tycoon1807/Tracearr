@@ -1380,13 +1380,23 @@ function parseLibraryItem(item: Record<string, unknown>): MediaLibraryItem {
   const externalIds = parseExternalIds(guids);
 
   // Parse addedAt from Unix timestamp with validation
-  // Reject dates before 2005 (before Plex existed) to prevent bad data like 1969/1970
-  const MIN_VALID_YEAR = 2005;
+  // Reject dates before 2015 to prevent bad data like 1969/1970
+  // Fallback chain: addedAt timestamp -> Jan 1 of year -> now
+  const MIN_VALID_YEAR = 2015;
   const addedAtTimestamp = parseOptionalNumber(item.addedAt);
+  const year = parseOptionalNumber(item.year);
   let addedAt: Date;
   if (addedAtTimestamp) {
     const parsedDate = new Date(addedAtTimestamp * 1000);
-    addedAt = parsedDate.getFullYear() >= MIN_VALID_YEAR ? parsedDate : new Date();
+    if (parsedDate.getFullYear() >= MIN_VALID_YEAR) {
+      addedAt = parsedDate;
+    } else if (year && year >= MIN_VALID_YEAR) {
+      addedAt = new Date(Date.UTC(year, 0, 1));
+    } else {
+      addedAt = new Date();
+    }
+  } else if (year && year >= MIN_VALID_YEAR) {
+    addedAt = new Date(Date.UTC(year, 0, 1));
   } else {
     addedAt = new Date();
   }

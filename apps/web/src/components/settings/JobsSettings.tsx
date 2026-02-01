@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Wrench,
   Play,
@@ -20,6 +21,13 @@ import {
   RefreshCw,
   Globe,
   Calendar,
+  Library,
+  Trash2,
+  CaseSensitive,
+  History,
+  HardDrive,
+  Activity,
+  ListTodo,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useSocket } from '@/hooks/useSocket';
@@ -44,8 +52,11 @@ interface JobOption {
   default: boolean;
 }
 
+type JobCategory = 'normalization' | 'backfill' | 'cleanup';
+
 interface JobDefinition {
   type: string;
+  category: JobCategory;
   name: string;
   description: string;
   options?: JobOption[];
@@ -69,14 +80,31 @@ interface JobHistoryItem {
   };
 }
 
+interface QueueStats {
+  waiting: number;
+  active: number;
+  completed: number;
+  failed: number;
+  delayed: number;
+}
+
 // Map job types to icons
 const JOB_ICONS: Record<string, typeof Database> = {
   normalize_players: Database,
   normalize_countries: Globe,
-  fix_imported_progress: RefreshCw,
-  rebuild_timescale_views: Database,
   normalize_codecs: ArrowUpDown,
+  fix_imported_progress: RefreshCw,
   backfill_user_dates: Calendar,
+  backfill_library_snapshots: Library,
+  rebuild_timescale_views: HardDrive,
+  full_aggregate_rebuild: History,
+  cleanup_old_chunks: Trash2,
+};
+
+const CATEGORY_CONFIG: Record<JobCategory, { icon: typeof Database; label: string }> = {
+  normalization: { icon: CaseSensitive, label: 'Normalization' },
+  backfill: { icon: History, label: 'Backfill' },
+  cleanup: { icon: HardDrive, label: 'Cleanup' },
 };
 
 function formatDuration(ms: number): string {
@@ -97,7 +125,14 @@ export function JobsSettings() {
   const [progress, setProgress] = useState<MaintenanceJobProgress | null>(null);
   const [confirmJob, setConfirmJob] = useState<JobDefinition | null>(null);
   const [jobOptions, setJobOptions] = useState<Record<string, boolean>>({});
+  const [activeCategory, setActiveCategory] = useState<JobCategory>('normalization');
+  const [queueStats, setQueueStats] = useState<QueueStats | null>(null);
   const { socket } = useSocket();
+
+  const filteredJobs = useMemo(
+    () => jobs.filter((job) => job.category === activeCategory),
+    [jobs, activeCategory]
+  );
 
   // Reset options when confirm dialog opens
   const openConfirmDialog = useCallback((job: JobDefinition) => {
@@ -145,6 +180,23 @@ export function JobsSettings() {
     void fetchHistory();
   }, []);
 
+  // Fetch queue stats
+  const fetchQueueStats = useCallback(async () => {
+    try {
+      const stats = await api.maintenance.getStats();
+      setQueueStats(stats);
+    } catch (err) {
+      console.error('Failed to fetch queue stats:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchQueueStats();
+    // Refresh stats every 10 seconds while on the page
+    const interval = setInterval(() => void fetchQueueStats(), 10000);
+    return () => clearInterval(interval);
+  }, [fetchQueueStats]);
+
   // Check for active job on mount
   useEffect(() => {
     const checkActiveJob = async () => {
@@ -153,8 +205,8 @@ export function JobsSettings() {
         if (result.progress) {
           const progressData = result.progress as MaintenanceJobProgress;
           setProgress(progressData);
-          // Only set as running if status is actually 'running'
-          if (progressData.status === 'running') {
+          // Set as running if status is 'running' or 'waiting'
+          if (progressData.status === 'running' || progressData.status === 'waiting') {
             setRunningJob(progressData.type);
           }
         }
@@ -172,18 +224,20 @@ export function JobsSettings() {
 
     const handleProgress = (data: MaintenanceJobProgress) => {
       setProgress(data);
-      setRunningJob(data.status === 'running' ? data.type : null);
+      setRunningJob(data.status === 'running' || data.status === 'waiting' ? data.type : null);
 
       if (data.status === 'complete') {
         toast.success(t('toast.success.jobCompleted.title'), {
           description: data.message,
         });
         void fetchHistory();
+        void fetchQueueStats();
         setRunningJob(null);
       } else if (data.status === 'error') {
         toast.warning(t('toast.warning.jobFailed.title'), {
           description: data.message,
         });
+        void fetchQueueStats();
         setRunningJob(null);
       }
     };
@@ -192,7 +246,7 @@ export function JobsSettings() {
     return () => {
       socket.off('maintenance:progress', handleProgress);
     };
-  }, [socket, fetchHistory]);
+  }, [socket, fetchHistory, fetchQueueStats]);
 
   const handleStartJob = async (type: string, options?: Record<string, boolean>) => {
     setConfirmJob(null);
@@ -248,9 +302,43 @@ export function JobsSettings() {
 
   return (
     <div className="space-y-4">
+      {/* Queue Status Banner */}
+      {queueStats &&
+        (queueStats.active > 0 || queueStats.waiting > 0 || queueStats.delayed > 0) && (
+          <div className="border-primary/20 bg-primary/5 flex items-center gap-4 rounded-lg border px-4 py-3">
+            <Activity className="text-primary h-5 w-5" />
+            <div className="flex flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+              {queueStats.active > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="bg-primary absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" />
+                    <span className="bg-primary relative inline-flex h-2 w-2 rounded-full" />
+                  </span>
+                  <span className="font-medium">{queueStats.active}</span>
+                  <span className="text-muted-foreground">running</span>
+                </span>
+              )}
+              {queueStats.waiting > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <ListTodo className="text-muted-foreground h-3.5 w-3.5" />
+                  <span className="font-medium">{queueStats.waiting}</span>
+                  <span className="text-muted-foreground">queued</span>
+                </span>
+              )}
+              {queueStats.delayed > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <Clock className="text-muted-foreground h-3.5 w-3.5" />
+                  <span className="font-medium">{queueStats.delayed}</span>
+                  <span className="text-muted-foreground">delayed</span>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
       {/* Available Jobs */}
       <Card>
-        <CardHeader>
+        <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2">
             <Wrench className="h-5 w-5" />
             Maintenance Jobs
@@ -260,7 +348,30 @@ export function JobsSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {jobs.map((job) => {
+          <Tabs
+            value={activeCategory}
+            onValueChange={(v) => setActiveCategory(v as JobCategory)}
+            className="w-full"
+          >
+            <TabsList className="grid w-full grid-cols-3">
+              {(Object.keys(CATEGORY_CONFIG) as JobCategory[]).map((category) => {
+                const config = CATEGORY_CONFIG[category];
+                const CategoryIcon = config.icon;
+                const jobCount = jobs.filter((j) => j.category === category).length;
+                return (
+                  <TabsTrigger key={category} value={category} className="gap-1.5">
+                    <CategoryIcon className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">{config.label}</span>
+                    <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">
+                      {jobCount}
+                    </Badge>
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+          </Tabs>
+
+          {filteredJobs.map((job) => {
             const JobIcon = JOB_ICONS[job.type] || Wrench;
             const isRunning = runningJob === job.type;
 
@@ -299,10 +410,17 @@ export function JobsSettings() {
                     className="shrink-0 self-start sm:self-center"
                   >
                     {isRunning ? (
-                      <>
-                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        Running
-                      </>
+                      progress?.status === 'waiting' ? (
+                        <>
+                          <Clock className="mr-1.5 h-3.5 w-3.5 animate-pulse" />
+                          Waiting
+                        </>
+                      ) : (
+                        <>
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          Running
+                        </>
+                      )
                     ) : (
                       <>
                         <Play className="mr-1.5 h-3.5 w-3.5" />
@@ -351,6 +469,16 @@ export function JobsSettings() {
                           errors
                         </span>
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline Waiting Status */}
+                {isRunning && progress?.status === 'waiting' && (
+                  <div className="mt-4 border-t pt-4">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Clock className="text-muted-foreground h-4 w-4 animate-pulse" />
+                      <span className="text-muted-foreground">{progress.message}</span>
                     </div>
                   </div>
                 )}

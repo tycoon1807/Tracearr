@@ -10,6 +10,11 @@ import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { getActiveAggregateNames } from '../db/timescale.js';
+import { clearStuckMaintenanceJobs, obliterateMaintenanceQueue } from '../jobs/maintenanceQueue.js';
+import { obliterateImportQueue } from '../jobs/importQueue.js';
+import { obliterateLibrarySyncQueue } from '../jobs/librarySyncQueue.js';
+import { forceReleaseHeavyOpsLock } from '../jobs/heavyOpsLock.js';
 import {
   sessions,
   violations,
@@ -370,18 +375,80 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
    */
   app.post('/refresh-aggregates', async () => {
     try {
-      // Refresh all continuous aggregates
-      await db.execute(sql`
-        CALL refresh_continuous_aggregate('hourly_stats', NULL, NULL)
-      `);
-      await db.execute(sql`
-        CALL refresh_continuous_aggregate('daily_stats', NULL, NULL)
-      `);
-      return { success: true, message: 'Aggregates refreshed' };
+      // Refresh all active continuous aggregates with bounded time range
+      const endTime = new Date();
+      const startTime = new Date(endTime.getTime() - 7 * 24 * 60 * 60 * 1000); // Last 7 days
+
+      // Use the centralized aggregate list to stay in sync with timescale.ts
+      const aggregates = getActiveAggregateNames();
+
+      // Convert to ISO strings - CALL statements need explicit type hints
+      const startStr = startTime.toISOString();
+      const endStr = endTime.toISOString();
+
+      for (const agg of aggregates) {
+        try {
+          // Use parameterized query - agg::regclass validates it's a real relation
+          await db.execute(
+            sql`CALL refresh_continuous_aggregate(${agg}::regclass, ${startStr}::timestamptz, ${endStr}::timestamptz)`
+          );
+        } catch {
+          // Individual aggregate might not exist - continue with others
+        }
+      }
+
+      return { success: true, message: 'Aggregates refreshed (last 7 days)' };
     } catch {
       // Aggregates might not exist yet
       return { success: false, message: 'Aggregates not configured or refresh failed' };
     }
+  });
+
+  /**
+   * POST /debug/clear-stuck-jobs - Clear stuck maintenance jobs
+   *
+   * Use this to recover from a crash where jobs are left in active state.
+   */
+  app.post('/clear-stuck-jobs', async () => {
+    const result = await clearStuckMaintenanceJobs();
+    return {
+      success: true,
+      message:
+        result.cleared > 0 ? `Cleared ${result.cleared} stuck job(s)` : 'No stuck jobs found',
+      cleared: result.cleared,
+    };
+  });
+
+  /**
+   * POST /debug/obliterate-all-jobs - Nuclear option: clear ALL jobs from ALL queues
+   *
+   * Completely wipes maintenance, import, and library sync queues.
+   * Also releases any heavy operation locks.
+   * Use when job system is in an unrecoverable state.
+   */
+  app.post('/obliterate-all-jobs', async () => {
+    const results = await Promise.all([
+      obliterateMaintenanceQueue(),
+      obliterateImportQueue(),
+      obliterateLibrarySyncQueue(),
+    ]);
+
+    // Also release any heavy ops lock
+    await forceReleaseHeavyOpsLock();
+
+    const allSuccess = results.every((r) => r.success);
+
+    return {
+      success: allSuccess,
+      message: allSuccess
+        ? 'All job queues obliterated and locks released'
+        : 'Some queues failed to obliterate (check logs)',
+      queues: {
+        maintenance: results[0].success,
+        import: results[1].success,
+        librarySync: results[2].success,
+      },
+    };
   });
 
   /**

@@ -622,6 +622,31 @@ export function Debug() {
                   <RefreshCw className="mr-2 h-4 w-4" />
                   Refresh Aggregates
                 </Button>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    handleDelete('clear-stuck-jobs', 'Clear stuck maintenance jobs', true)
+                  }
+                  disabled={deleteMutation.isPending}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Clear Stuck Jobs
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                  onClick={() =>
+                    handleDelete(
+                      'obliterate-all-jobs',
+                      'OBLITERATE ALL JOBS: This will completely wipe ALL job queues (maintenance, import, library sync) and release all locks. Use only when jobs are completely stuck.',
+                      true
+                    )
+                  }
+                  disabled={deleteMutation.isPending}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Obliterate All Jobs
+                </Button>
                 <Button variant="outline" onClick={() => queryClient.invalidateQueries()}>
                   <RotateCcw className="mr-2 h-4 w-4" />
                   Clear Query Cache

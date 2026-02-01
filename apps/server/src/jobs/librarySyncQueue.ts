@@ -37,6 +37,10 @@ let librarySyncWorker: Worker<LibrarySyncJobData> | null = null;
 let redisClient: Redis | null = null;
 const activeSyncs = new Map<string, boolean>();
 
+// Backfill check cooldown - only check once per hour to avoid constant queries
+let lastBackfillCheck: number = 0;
+const BACKFILL_CHECK_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
 /**
  * Invalidate library-related caches after sync completes.
  * Uses pattern matching to clear all variants (per-server, per-library, with timezone, etc.)
@@ -220,9 +224,14 @@ export function startLibrarySyncWorker(): void {
     console.error('[LibrarySync] Worker error:', error);
   });
 
-  // After sync completes, check if snapshot backfill is needed
+  // After sync completes, check if snapshot backfill is needed (with cooldown)
+  // Only runs once per hour to avoid constant queries after every server sync
   librarySyncWorker.on('completed', () => {
-    void checkAndTriggerSnapshotBackfill();
+    const now = Date.now();
+    if (now - lastBackfillCheck > BACKFILL_CHECK_COOLDOWN_MS) {
+      lastBackfillCheck = now;
+      void checkAndTriggerSnapshotBackfill();
+    }
   });
 
   console.log('Library sync worker started');
@@ -230,48 +239,58 @@ export function startLibrarySyncWorker(): void {
 
 /**
  * Check if library snapshots need backfilling and trigger if so.
- * Compares earliest library_items.created_at (with valid size) with earliest snapshot_time.
- * Only considers items with file_size since those without can't produce meaningful snapshots.
+ * Compares earliest library_items.created_at (with valid size) with earliest aggregate date.
+ *
+ * IMPORTANT: We check the library_stats_daily continuous aggregate, NOT raw library_snapshots.
+ * This prevents a race condition where:
+ * 1. Backfill creates raw snapshots and refreshes aggregate
+ * 2. Retention policy deletes old raw snapshots
+ * 3. This check sees gap in raw table and triggers backfill again (infinite loop)
+ *
+ * The aggregate persists independently of raw data, so checking it avoids the loop.
+ * Charts also query the aggregate, so this check matches actual data availability.
+ *
  * Runs non-blocking - errors are logged but don't affect other operations.
  */
 async function checkAndTriggerSnapshotBackfill(): Promise<void> {
   try {
-    // Get earliest item date (only items with valid size) and earliest snapshot date
-    // See snapshotValidation.ts for why we filter on file_size
+    // Get earliest item date (only items with valid size) and earliest aggregate date
+    // We check library_stats_daily (aggregate) instead of raw library_snapshots
+    // because the aggregate persists after raw chunks are cleaned up
     const result = await db.execute(sql`
       SELECT
         (SELECT MIN(created_at)::date FROM library_items
          WHERE ${VALID_LIBRARY_ITEM_CONDITION}) AS earliest_item,
-        (SELECT MIN(snapshot_time)::date FROM library_snapshots) AS earliest_snapshot,
+        (SELECT MIN(day)::date FROM library_stats_daily) AS earliest_aggregate,
         (SELECT COUNT(*) FROM library_items) AS item_count,
-        (SELECT COUNT(*) FROM library_snapshots) AS snapshot_count
+        (SELECT COUNT(DISTINCT day) FROM library_stats_daily) AS aggregate_days
     `);
 
     const row = result.rows[0] as {
       earliest_item: string | null;
-      earliest_snapshot: string | null;
+      earliest_aggregate: string | null;
       item_count: string;
-      snapshot_count: string;
+      aggregate_days: string;
     };
 
     const itemCount = parseInt(row.item_count, 10);
-    const snapshotCount = parseInt(row.snapshot_count, 10);
+    const aggregateDays = parseInt(row.aggregate_days, 10);
 
     // No items = nothing to backfill
     if (itemCount === 0) {
       return;
     }
 
-    // No snapshots yet, or snapshots start after items - need backfill
+    // No aggregate data yet, or aggregate starts after items - need backfill
     const needsBackfill =
-      snapshotCount === 0 ||
+      aggregateDays === 0 ||
       (row.earliest_item &&
-        row.earliest_snapshot &&
-        new Date(row.earliest_item) < new Date(row.earliest_snapshot));
+        row.earliest_aggregate &&
+        new Date(row.earliest_item) < new Date(row.earliest_aggregate));
 
     if (needsBackfill) {
       console.log(
-        `[LibrarySync] Snapshot backfill needed: items from ${row.earliest_item}, snapshots from ${row.earliest_snapshot || 'none'}`
+        `[LibrarySync] Snapshot backfill needed: items from ${row.earliest_item}, aggregate from ${row.earliest_aggregate || 'none'}`
       );
 
       // Trigger backfill job (non-blocking, will be queued)
@@ -291,7 +310,8 @@ async function checkAndTriggerSnapshotBackfill(): Promise<void> {
 }
 
 /**
- * Schedule daily auto-sync for all servers at 3 AM UTC
+ * Schedule auto-sync for all servers every 12 hours at :10 past the hour (UTC)
+ * Offset from :00 to avoid collision with aggregate auto-refresh
  */
 export async function scheduleAutoSync(): Promise<void> {
   if (!librarySyncQueue) {
@@ -322,7 +342,7 @@ export async function scheduleAutoSync(): Promise<void> {
       },
       {
         repeat: {
-          pattern: '0 * * * *', // Every hour
+          pattern: '10 */12 * * *', // Every 12 hours at :10 (offset from :00 to avoid collision)
           tz: 'UTC',
         },
         jobId: `scheduled-${server.id}`,
@@ -330,7 +350,9 @@ export async function scheduleAutoSync(): Promise<void> {
     );
   }
 
-  console.log(`[LibrarySync] Scheduled auto-sync for ${allServers.length} server(s) every hour`);
+  console.log(
+    `[LibrarySync] Scheduled auto-sync for ${allServers.length} server(s) every 12 hours`
+  );
 
   // Queue an immediate sync on boot (non-blocking, staggered to avoid overwhelming startup)
   // Check for any pending/delayed jobs first to avoid duplicates after rapid restarts
@@ -457,6 +479,27 @@ export async function getAllActiveLibrarySyncs(): Promise<
       };
     })
   );
+}
+
+/**
+ * Obliterate the library sync queue - removes ALL jobs (nuclear option)
+ *
+ * This completely wipes the queue, including completed and failed jobs.
+ * Use when the queue is in an unrecoverable state.
+ */
+export async function obliterateLibrarySyncQueue(): Promise<{ success: boolean }> {
+  if (!librarySyncQueue) {
+    return { success: false };
+  }
+
+  try {
+    await librarySyncQueue.obliterate({ force: true });
+    console.log('[LibrarySync] Queue obliterated');
+    return { success: true };
+  } catch (error) {
+    console.error('[LibrarySync] Failed to obliterate queue:', error);
+    return { success: false };
+  }
 }
 
 /**

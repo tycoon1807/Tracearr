@@ -5,13 +5,16 @@
  * Includes batch loading for performance optimization and rule fetching.
  */
 
-import { eq, and, desc, gte, inArray } from 'drizzle-orm';
+import { eq, and, desc, gte, inArray, isNotNull } from 'drizzle-orm';
 import {
   TIME_MS,
   SESSION_LIMITS,
   type Session,
   type Rule,
   type RuleParams,
+  type RuleV2,
+  type RuleConditions,
+  type RuleActions,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { sessions, rules } from '../../db/schema.js';
@@ -73,7 +76,10 @@ export async function batchGetRecentUserSessions(
 // ============================================================================
 
 /**
- * Get all active rules for evaluation
+ * Get all active legacy (V1) rules for evaluation
+ *
+ * Only returns rules with type and params set (legacy format).
+ * V2 rules using conditions/actions are evaluated by a separate system.
  *
  * @returns Array of active Rule objects
  *
@@ -82,15 +88,50 @@ export async function batchGetRecentUserSessions(
  * // Evaluate each session against these rules
  */
 export async function getActiveRules(): Promise<Rule[]> {
-  const activeRules = await db.select().from(rules).where(eq(rules.isActive, true));
+  // Filter for legacy rules that have type set (V2 rules have type=null)
+  const activeRules = await db
+    .select()
+    .from(rules)
+    .where(and(eq(rules.isActive, true), isNotNull(rules.type)));
 
   return activeRules.map((r) => ({
     id: r.id,
     name: r.name,
-    type: r.type,
+    type: r.type!,
     params: r.params as unknown as RuleParams,
     serverUserId: r.serverUserId,
     isActive: r.isActive,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  }));
+}
+
+/**
+ * Get all active V2 rules (rules with conditions/actions defined).
+ *
+ * V2 rules use the new conditions/actions format instead of the legacy type/params.
+ * These rules are evaluated by the session lifecycle event system.
+ *
+ * @returns Array of active RuleV2 objects
+ *
+ * @example
+ * const rulesV2 = await getActiveRulesV2();
+ * // Evaluate session events against these rules
+ */
+export async function getActiveRulesV2(): Promise<RuleV2[]> {
+  const activeRules = await db
+    .select()
+    .from(rules)
+    .where(and(eq(rules.isActive, true), isNotNull(rules.conditions)));
+
+  return activeRules.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    serverId: r.serverId,
+    isActive: r.isActive,
+    conditions: r.conditions as RuleConditions,
+    actions: r.actions as RuleActions,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   }));

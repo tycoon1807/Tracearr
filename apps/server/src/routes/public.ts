@@ -238,7 +238,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
           episodeNumber: session.episodeNumber,
           year: session.year,
           thumbPath: session.thumbPath,
-          durationMs: session.durationMs,
+          durationMs: session.totalDurationMs,
           // Playback state
           state: session.state,
           progressMs: session.progressMs ?? 0,

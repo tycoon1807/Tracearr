@@ -159,5 +159,11 @@ export function TopListChart({
     );
   }
 
-  return <HighchartsReact highcharts={Highcharts} options={options} />;
+  return (
+    <HighchartsReact
+      highcharts={Highcharts}
+      options={options}
+      containerProps={{ style: { width: '100%', height: '100%' } }}
+    />
+  );
 }

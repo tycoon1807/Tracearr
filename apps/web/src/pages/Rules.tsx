@@ -15,7 +15,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
@@ -25,6 +24,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Plus,
   Pencil,
@@ -37,10 +42,22 @@ import {
   Clock,
   Power,
   PowerOff,
+  ChevronDown,
+  Sparkles,
+  Settings2,
 } from 'lucide-react';
 import { CountryMultiSelect } from '@/components/ui/country-multi-select';
 import { getCountryName } from '@/lib/utils';
-import type { Rule, RuleType, RuleParams, UnitSystem } from '@tracearr/shared';
+import type {
+  Rule,
+  RuleType,
+  RuleParams,
+  UnitSystem,
+  CreateRuleV2Input,
+  UpdateRuleV2Input,
+  RulesFilterOptions,
+} from '@tracearr/shared';
+import { RuleBuilderDialog, getRuleIcon, getRuleSummary, isV2Rule } from '@/components/rules';
 import {
   getSpeedUnit,
   getDistanceUnit,
@@ -57,6 +74,8 @@ import {
   useBulkDeleteRules,
   useSettings,
 } from '@/hooks/queries';
+import { useCreateRuleV2, useUpdateRuleV2 } from '@/hooks/queries/useRulesV2';
+import { useRulesFilterOptions } from '@/hooks/queries/useHistory';
 import { useRowSelection } from '@/hooks/useRowSelection';
 
 const RULE_TYPE_ICONS: Record<RuleType, React.ReactNode> = {
@@ -543,6 +562,7 @@ function RuleCard({
   unitSystem,
   isSelected,
   onSelect,
+  filterOptions,
 }: {
   rule: Rule;
   onEdit: () => void;
@@ -551,12 +571,24 @@ function RuleCard({
   unitSystem: UnitSystem;
   isSelected?: boolean;
   onSelect?: () => void;
+  filterOptions?: RulesFilterOptions;
 }) {
   const { t } = useTranslation('pages');
   const ruleTypes = useRuleTypes();
   const ruleType = ruleTypes.find((rt) => rt.value === rule.type);
   const speedUnit = getSpeedUnit(unitSystem);
   const distanceUnit = getDistanceUnit(unitSystem);
+  const isV2 = isV2Rule(rule);
+
+  // Get icon: V2 rules infer from first condition, V1 uses type mapping
+  const icon = isV2
+    ? getRuleIcon(rule)
+    : ((rule.type ? RULE_TYPE_ICONS[rule.type] : null) ?? <Shield className="h-5 w-5" />);
+
+  // Get subtitle: V2 shows summary, V1 shows type label
+  const subtitle = isV2
+    ? getRuleSummary(rule, filterOptions)
+    : (ruleType?.label ?? rule.type?.replace(/_/g, ' ') ?? 'Unknown');
 
   return (
     <Card
@@ -573,7 +605,7 @@ function RuleCard({
               />
             )}
             <div className="bg-muted flex h-10 w-10 items-center justify-center rounded-lg">
-              {RULE_TYPE_ICONS[rule.type] ?? <Shield className="h-5 w-5" />}
+              {icon}
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -582,79 +614,83 @@ function RuleCard({
                   <span className="text-muted-foreground text-xs">({t('rules.disable')}d)</span>
                 )}
               </div>
-              <p className="text-muted-foreground text-sm">
-                {ruleType?.label ?? rule.type.replace(/_/g, ' ')}
-              </p>
-              <div className="text-muted-foreground mt-2 text-xs">
-                {rule.type === 'impossible_travel' && (
-                  <span>
-                    {t('rules.maxSpeed', { unit: speedUnit })}:{' '}
-                    {Math.round(
-                      fromMetricDistance(
-                        (rule.params as { maxSpeedKmh: number }).maxSpeedKmh,
-                        unitSystem
-                      )
-                    )}{' '}
-                    {speedUnit}
-                  </span>
-                )}
-                {rule.type === 'simultaneous_locations' && (
-                  <span>
-                    {t('rules.minDistance', { unit: distanceUnit })}:{' '}
-                    {Math.round(
-                      fromMetricDistance(
-                        (rule.params as { minDistanceKm: number }).minDistanceKm,
-                        unitSystem
-                      )
-                    )}{' '}
-                    {distanceUnit}
-                  </span>
-                )}
-                {rule.type === 'device_velocity' && (
-                  <span>
-                    {t('rules.maxIps')}:{' '}
-                    {(rule.params as { maxIps: number; windowHours: number }).maxIps} /{' '}
-                    {(rule.params as { maxIps: number; windowHours: number }).windowHours}h
-                  </span>
-                )}
-                {rule.type === 'concurrent_streams' && (
-                  <span>
-                    {t('rules.maxStreams')}: {(rule.params as { maxStreams: number }).maxStreams}
-                  </span>
-                )}
-                {rule.type === 'geo_restriction' &&
-                  (() => {
-                    const p = rule.params as {
-                      mode?: string;
-                      countries?: string[];
-                      blockedCountries?: string[];
-                    };
-                    const mode = p.mode ?? 'blocklist';
-                    const countries = p.countries ?? p.blockedCountries ?? [];
-                    const countryNames = countries.map((c) => getCountryName(c) ?? c);
-                    return (
-                      <span>
-                        {mode === 'allowlist' ? t('rules.allowed') : t('rules.blocked')}:{' '}
-                        {countryNames.join(', ') || t('rules.none')}
-                      </span>
-                    );
-                  })()}
-                {rule.type === 'account_inactivity' &&
-                  (() => {
-                    const p = rule.params as {
-                      inactivityValue: number;
-                      inactivityUnit: string;
-                    };
-                    return (
-                      <span>
-                        {t('rules.inactiveFor', {
-                          value: p.inactivityValue,
-                          unit: p.inactivityUnit,
-                        })}
-                      </span>
-                    );
-                  })()}
-              </div>
+              {isV2 && rule.description && (
+                <p className="text-muted-foreground text-sm">{rule.description}</p>
+              )}
+              <p className="text-muted-foreground text-sm">{subtitle}</p>
+              {/* V1 rules: show parameter details */}
+              {!isV2 && (
+                <div className="text-muted-foreground mt-2 text-xs">
+                  {rule.type === 'impossible_travel' && (
+                    <span>
+                      {t('rules.maxSpeed', { unit: speedUnit })}:{' '}
+                      {Math.round(
+                        fromMetricDistance(
+                          (rule.params as { maxSpeedKmh: number }).maxSpeedKmh,
+                          unitSystem
+                        )
+                      )}{' '}
+                      {speedUnit}
+                    </span>
+                  )}
+                  {rule.type === 'simultaneous_locations' && (
+                    <span>
+                      {t('rules.minDistance', { unit: distanceUnit })}:{' '}
+                      {Math.round(
+                        fromMetricDistance(
+                          (rule.params as { minDistanceKm: number }).minDistanceKm,
+                          unitSystem
+                        )
+                      )}{' '}
+                      {distanceUnit}
+                    </span>
+                  )}
+                  {rule.type === 'device_velocity' && (
+                    <span>
+                      {t('rules.maxIps')}:{' '}
+                      {(rule.params as { maxIps: number; windowHours: number }).maxIps} /{' '}
+                      {(rule.params as { maxIps: number; windowHours: number }).windowHours}h
+                    </span>
+                  )}
+                  {rule.type === 'concurrent_streams' && (
+                    <span>
+                      {t('rules.maxStreams')}: {(rule.params as { maxStreams: number }).maxStreams}
+                    </span>
+                  )}
+                  {rule.type === 'geo_restriction' &&
+                    (() => {
+                      const p = rule.params as {
+                        mode?: string;
+                        countries?: string[];
+                        blockedCountries?: string[];
+                      };
+                      const mode = p.mode ?? 'blocklist';
+                      const countries = p.countries ?? p.blockedCountries ?? [];
+                      const countryNames = countries.map((c) => getCountryName(c) ?? c);
+                      return (
+                        <span>
+                          {mode === 'allowlist' ? t('rules.allowed') : t('rules.blocked')}:{' '}
+                          {countryNames.join(', ') || t('rules.none')}
+                        </span>
+                      );
+                    })()}
+                  {rule.type === 'account_inactivity' &&
+                    (() => {
+                      const p = rule.params as {
+                        inactivityValue: number;
+                        inactivityUnit: string;
+                      };
+                      return (
+                        <span>
+                          {t('rules.inactiveFor', {
+                            value: p.inactivityValue,
+                            unit: p.inactivityUnit,
+                          })}
+                        </span>
+                      );
+                    })()}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -685,10 +721,18 @@ export function Rules() {
 
   const unitSystem = settings?.unitSystem ?? 'metric';
 
+  // V1 Classic rule dialog state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<Rule | undefined>();
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+
+  // V2 Custom rule builder dialog state
+  const [isV2DialogOpen, setIsV2DialogOpen] = useState(false);
+  const [editingV2Rule, setEditingV2Rule] = useState<Rule | undefined>();
+  const createRuleV2 = useCreateRuleV2();
+  const updateRuleV2 = useUpdateRuleV2();
+  const { data: rulesFilterOptions } = useRulesFilterOptions();
 
   // Row selection for bulk operations
   const { selectedIds, selectedCount, toggleRow, clearSelection, isSelected } = useRowSelection({
@@ -779,6 +823,27 @@ export function Rules() {
     setIsDialogOpen(true);
   };
 
+  // V2 Custom rule handlers
+  const openV2CreateDialog = () => {
+    setEditingV2Rule(undefined);
+    setIsV2DialogOpen(true);
+  };
+
+  const openV2EditDialog = (rule: Rule) => {
+    setEditingV2Rule(rule);
+    setIsV2DialogOpen(true);
+  };
+
+  const handleV2Save = async (data: CreateRuleV2Input | UpdateRuleV2Input) => {
+    if (editingV2Rule) {
+      await updateRuleV2.mutateAsync({ id: editingV2Rule.id, data });
+    } else {
+      await createRuleV2.mutateAsync(data as CreateRuleV2Input);
+    }
+    setIsV2DialogOpen(false);
+    setEditingV2Rule(undefined);
+  };
+
   const bulkActions: BulkAction[] = [
     {
       key: 'enable',
@@ -813,13 +878,27 @@ export function Rules() {
           <h1 className="text-3xl font-bold">{t('pages:rules.title')}</h1>
           <p className="text-muted-foreground">{t('pages:rules.description')}</p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={openCreateDialog}>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button>
               <Plus className="mr-2 h-4 w-4" />
               {t('pages:rules.addRule')}
+              <ChevronDown className="ml-2 h-4 w-4" />
             </Button>
-          </DialogTrigger>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={openCreateDialog}>
+              <Settings2 className="mr-2 h-4 w-4" />
+              Classic Rule
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={openV2CreateDialog}>
+              <Sparkles className="mr-2 h-4 w-4" />
+              Custom Rule
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>
@@ -868,10 +947,25 @@ export function Rules() {
               <h3 className="font-semibold">{t('pages:rules.noRulesConfigured')}</h3>
               <p className="text-muted-foreground text-sm">{t('pages:rules.createFirstRule')}</p>
             </div>
-            <Button onClick={openCreateDialog}>
-              <Plus className="mr-2 h-4 w-4" />
-              {t('pages:rules.addRule')}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  {t('pages:rules.addRule')}
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={openCreateDialog}>
+                  <Settings2 className="mr-2 h-4 w-4" />
+                  Classic Rule
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={openV2CreateDialog}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Custom Rule
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </CardContent>
         </Card>
       ) : (
@@ -881,7 +975,12 @@ export function Rules() {
               key={rule.id}
               rule={rule}
               onEdit={() => {
-                openEditDialog(rule);
+                // Route to appropriate editor based on rule version
+                if (isV2Rule(rule)) {
+                  openV2EditDialog(rule);
+                } else {
+                  openEditDialog(rule);
+                }
               }}
               onDelete={() => {
                 setDeleteConfirmId(rule.id);
@@ -892,6 +991,7 @@ export function Rules() {
               unitSystem={unitSystem}
               isSelected={isSelected(rule)}
               onSelect={() => toggleRow(rule)}
+              filterOptions={rulesFilterOptions}
             />
           ))}
         </div>
@@ -925,6 +1025,16 @@ export function Rules() {
         confirmLabel={t('common:actions.delete')}
         onConfirm={() => deleteConfirmId && handleDelete(deleteConfirmId)}
         isLoading={deleteRule.isPending}
+      />
+
+      {/* V2 Custom Rule Builder Dialog */}
+      <RuleBuilderDialog
+        open={isV2DialogOpen}
+        onOpenChange={setIsV2DialogOpen}
+        rule={editingV2Rule}
+        onSave={handleV2Save}
+        isLoading={createRuleV2.isPending || updateRuleV2.isPending}
+        filterOptions={rulesFilterOptions}
       />
     </div>
   );

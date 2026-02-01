@@ -102,8 +102,11 @@ import {
   scheduleInactivityChecks,
   shutdownInactivityCheckQueue,
 } from './jobs/inactivityCheckQueue.js';
+import { initHeavyOpsLock } from './jobs/heavyOpsLock.js';
 import { initPushRateLimiter } from './services/pushRateLimiter.js';
+import { initializeV2Rules } from './services/rules/v2Integration.js';
 import { processPushReceipts } from './services/pushNotification.js';
+import { cleanupMobileTokens } from './jobs/cleanupMobileTokens.js';
 import { db, runMigrations } from './db/client.js';
 import { initTimescaleDB, getTimescaleStatus } from './db/timescale.js';
 import { sql, eq } from 'drizzle-orm';
@@ -253,6 +256,15 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   // Redis plugin
   await app.register(redisPlugin);
 
+  // Initialize V2 rules system (wire dependencies, run migration)
+  try {
+    await initializeV2Rules(app.redis);
+    app.log.info('V2 rules system initialized');
+  } catch (err) {
+    app.log.error({ err }, 'Failed to initialize V2 rules system');
+    // Don't throw - rules can still work with default no-op deps
+  }
+
   // Auth plugin (depends on cookie)
   await app.register(authPlugin);
 
@@ -267,6 +279,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   app.log.info('Push notification rate limiter initialized');
 
   let pushReceiptInterval: ReturnType<typeof setInterval> | null = null;
+  let mobileTokenCleanupInterval: ReturnType<typeof setInterval> | null = null;
   try {
     initNotificationQueue(redisUrl);
     startNotificationWorker();
@@ -277,6 +290,15 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
         });
       },
       15 * 60 * 1000
+    );
+    // Cleanup expired/invalid mobile tokens every hour
+    mobileTokenCleanupInterval = setInterval(
+      () => {
+        cleanupMobileTokens().catch((err) => {
+          app.log.warn({ err }, 'Failed to cleanup mobile tokens');
+        });
+      },
+      60 * 60 * 1000 // 1 hour
     );
     app.log.info('Notification queue initialized');
   } catch (err) {
@@ -303,6 +325,10 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     app.log.error({ err }, 'Failed to initialize maintenance queue');
     // Don't throw - maintenance jobs are non-critical
   }
+
+  // Initialize heavy operations lock (coordinates import + maintenance jobs)
+  await initHeavyOpsLock(app.redis);
+  app.log.info('Heavy operations lock initialized');
 
   // Initialize library sync queue (uses Redis for job storage)
   try {
@@ -359,6 +385,9 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   app.addHook('onClose', async () => {
     if (pushReceiptInterval) {
       clearInterval(pushReceiptInterval);
+    }
+    if (mobileTokenCleanupInterval) {
+      clearInterval(mobileTokenCleanupInterval);
     }
     stopImageCacheCleanup();
     await pubSubRedis.quit();

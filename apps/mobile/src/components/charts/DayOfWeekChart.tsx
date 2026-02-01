@@ -3,12 +3,13 @@
  * Bar chart showing plays by day of week with touch interaction
  */
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import { CartesianChart, Bar, useChartPressState } from 'victory-native';
 import { Circle } from '@shopify/react-native-skia';
 import { useAnimatedReaction, runOnJS } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
-import { colors, spacing, borderRadius, typography } from '../../lib/theme';
+import { Text } from '@/components/ui/text';
+import { colors, ACCENT_COLOR } from '../../lib/theme';
 import { useChartFont } from './useChartFont';
 
 interface DayOfWeekChartProps {
@@ -18,8 +19,16 @@ interface DayOfWeekChartProps {
 
 const DAY_ABBREV = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function ToolTip({ x, y }: { x: SharedValue<number>; y: SharedValue<number> }) {
-  return <Circle cx={x} cy={y} r={5} color={colors.cyan.core} />;
+function ToolTip({
+  x,
+  y,
+  color,
+}: {
+  x: SharedValue<number>;
+  y: SharedValue<number>;
+  color: string;
+}) {
+  return <Circle cx={x} cy={y} r={5} color={color} />;
 }
 
 export function DayOfWeekChart({ data, height = 180 }: DayOfWeekChartProps) {
@@ -67,8 +76,8 @@ export function DayOfWeekChart({ data, height = 180 }: DayOfWeekChartProps) {
 
   if (chartData.length === 0) {
     return (
-      <View style={[styles.container, styles.emptyContainer, { height }]}>
-        <Text style={styles.emptyText}>No data available</Text>
+      <View className="bg-card items-center justify-center rounded-xl p-2" style={{ height }}>
+        <Text className="text-muted-foreground text-sm">No data available</Text>
       </View>
     );
   }
@@ -77,13 +86,15 @@ export function DayOfWeekChart({ data, height = 180 }: DayOfWeekChartProps) {
   const selectedDay = displayValue ? chartData.find((d) => d.x === displayValue.day) : null;
 
   return (
-    <View style={[styles.container, { height }]}>
+    <View className="bg-card rounded-xl p-2" style={{ height }}>
       {/* Active value display */}
-      <View style={styles.valueDisplay}>
+      <View className="mb-1 min-h-[18px] flex-row items-center justify-between px-1">
         {displayValue && selectedDay ? (
           <>
-            <Text style={styles.valueText}>{displayValue.count} plays</Text>
-            <Text style={styles.dayText}>{selectedDay.name}</Text>
+            <Text className="text-sm font-semibold" style={{ color: ACCENT_COLOR }}>
+              {displayValue.count} plays
+            </Text>
+            <Text className="text-muted-foreground text-xs">{selectedDay.name}</Text>
           </>
         ) : null}
       </View>
@@ -108,47 +119,16 @@ export function DayOfWeekChart({ data, height = 180 }: DayOfWeekChartProps) {
             <Bar
               points={points.count}
               chartBounds={chartBounds}
-              color={colors.cyan.core}
+              color={ACCENT_COLOR}
               roundedCorners={{ topLeft: 4, topRight: 4 }}
               animate={{ type: 'timing', duration: 500 }}
             />
-            {isActive && <ToolTip x={state.x.position} y={state.y.count.position} />}
+            {isActive && (
+              <ToolTip x={state.x.position} y={state.y.count.position} color={ACCENT_COLOR} />
+            )}
           </>
         )}
       </CartesianChart>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.card.dark,
-    borderRadius: borderRadius.lg,
-    padding: spacing.sm,
-  },
-  emptyContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: colors.text.muted.dark,
-    fontSize: typography.fontSize.sm,
-  },
-  valueDisplay: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xs,
-    marginBottom: spacing.xs,
-    minHeight: 18,
-  },
-  valueText: {
-    color: colors.cyan.core,
-    fontSize: typography.fontSize.sm,
-    fontWeight: '600',
-  },
-  dayText: {
-    color: colors.text.muted.dark,
-    fontSize: typography.fontSize.xs,
-  },
-});

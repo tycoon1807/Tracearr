@@ -4,19 +4,10 @@
  * Matches the design of web/src/components/history/SessionDetailSheet.tsx
  */
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import {
-  View,
-  ScrollView,
-  Pressable,
-  ActivityIndicator,
-  Image,
-  Alert,
-  StyleSheet,
-} from 'react-native';
+import { View, ScrollView, Pressable, ActivityIndicator, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, formatDistanceToNow } from 'date-fns';
-import { useState, useEffect } from 'react';
 import {
   Play,
   Pause,
@@ -42,7 +33,8 @@ import {
 } from 'lucide-react-native';
 import { api, getServerUrl } from '@/lib/api';
 import { useMediaServer } from '@/providers/MediaServerProvider';
-import { colors, spacing, borderRadius, withAlpha } from '@/lib/theme';
+import { useAuthStateStore } from '@/lib/authStateStore';
+import { colors, withAlpha, ACCENT_COLOR } from '@/lib/theme';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { UserAvatar } from '@/components/ui/user-avatar';
@@ -174,13 +166,13 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <View style={styles.sectionHeaderLeft}>
-          <View style={styles.sectionIconContainer}>
-            <Icon size={14} color={colors.cyan.core} />
+    <View className="border-border rounded-xl border p-2">
+      <View className="mb-2 flex-row items-center justify-between">
+        <View className="flex-row items-center gap-2">
+          <View className="bg-primary/15 h-6 w-6 items-center justify-center rounded-full">
+            <Icon size={14} color={ACCENT_COLOR} />
           </View>
-          <Text style={styles.sectionTitle}>{title}</Text>
+          <Text className="text-foreground text-sm font-medium">{title}</Text>
         </View>
         {badge}
       </View>
@@ -204,20 +196,17 @@ function InfoRow({
   mono?: boolean;
 }) {
   return (
-    <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <View style={styles.infoValueContainer}>
+    <View className="flex-row items-center justify-between">
+      <Text className="text-muted-foreground text-[13px]">{label}</Text>
+      <View className="flex-1 flex-row items-center justify-end gap-1">
         <Text
-          style={[
-            styles.infoValue,
-            valueColor ? { color: valueColor } : null,
-            mono ? styles.monoText : null,
-          ]}
+          className={`text-foreground text-[13px] ${mono ? 'font-mono text-[11px]' : ''}`}
+          style={valueColor ? { color: valueColor } : undefined}
           numberOfLines={1}
         >
           {value}
         </Text>
-        {subValue && <Text style={styles.infoSubValue}>{subValue}</Text>}
+        {subValue && <Text className="text-muted-foreground text-[11px]">{subValue}</Text>}
       </View>
     </View>
   );
@@ -228,17 +217,9 @@ export default function SessionDetailScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { selectedServerId } = useMediaServer();
-  const [serverUrl, setServerUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    void getServerUrl().then((url) => {
-      if (mounted) setServerUrl(url);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const connectionState = useAuthStateStore((s) => s.connectionState);
+  const isOffline = connectionState !== 'connected';
+  const serverUrl = getServerUrl();
 
   // Terminate session mutation
   const terminateMutation = useMutation({
@@ -286,16 +267,33 @@ export default function SessionDetailScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={['left', 'right', 'bottom']}>
-        <ActivityIndicator size="large" color={colors.cyan.core} />
+      <SafeAreaView
+        style={{
+          flex: 1,
+          backgroundColor: '#09090B',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        edges={['left', 'right', 'bottom']}
+      >
+        <ActivityIndicator size="large" color={ACCENT_COLOR} />
       </SafeAreaView>
     );
   }
 
   if (error || !session) {
     return (
-      <SafeAreaView style={styles.errorContainer} edges={['left', 'right', 'bottom']}>
-        <Text style={styles.errorText}>
+      <SafeAreaView
+        style={{
+          flex: 1,
+          backgroundColor: '#09090B',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 12,
+        }}
+        edges={['left', 'right', 'bottom']}
+      >
+        <Text className="text-destructive text-center">
           {error instanceof Error ? error.message : 'Failed to load session'}
         </Text>
       </SafeAreaView>
@@ -333,13 +331,16 @@ export default function SessionDetailScreen() {
   const stoppedAt = safeParseDate(session.stoppedAt);
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+    <SafeAreaView
+      style={{ flex: 1, backgroundColor: '#09090B' }}
+      edges={['left', 'right', 'bottom']}
+    >
+      <ScrollView style={{ flex: 1 }} contentContainerClassName="gap-2 p-3">
         {/* Header with state badge and terminate button */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
+        <View className="flex-row items-center justify-between pb-2">
+          <View className="flex-1 flex-row items-center gap-2">
             <StateIcon size={16} color={stateConfig.color} />
-            <Text style={styles.headerTitle}>Session Details</Text>
+            <Text className="text-foreground text-base font-semibold">Session Details</Text>
             <Badge
               variant={
                 session.state === 'playing'
@@ -355,8 +356,9 @@ export default function SessionDetailScreen() {
           {session.state !== 'stopped' && (
             <Pressable
               onPress={handleTerminate}
-              disabled={terminateMutation.isPending}
-              style={[styles.terminateButton, terminateMutation.isPending && styles.disabledButton]}
+              disabled={terminateMutation.isPending || isOffline}
+              className={`h-8 w-8 items-center justify-center rounded-full ${terminateMutation.isPending || isOffline ? 'opacity-50' : ''}`}
+              style={{ backgroundColor: withAlpha(colors.error, '15') }}
             >
               <X size={18} color={colors.error} />
             </Pressable>
@@ -364,65 +366,74 @@ export default function SessionDetailScreen() {
         </View>
 
         {/* Media Info - Hero section */}
-        <View style={styles.mediaCard}>
+        <View className="border-border flex-row gap-2 rounded-xl border p-2">
           {posterUrl && (
-            <Image source={{ uri: posterUrl }} style={styles.poster} resizeMode="cover" />
+            <Image
+              source={{ uri: posterUrl }}
+              className="bg-surface rounded-lg"
+              style={{ width: 56, height: 80 }}
+              resizeMode="cover"
+            />
           )}
-          <View style={styles.mediaInfo}>
-            <View style={styles.mediaTypeBadge}>
+          <View className="min-w-0 flex-1">
+            <View className="mb-1 flex-row items-center gap-1">
               <MediaIcon size={12} color={colors.text.muted.dark} />
-              <Text style={styles.mediaTypeText}>{mediaConfig.label}</Text>
-              {session.year && <Text style={styles.mediaTypeText}>· {session.year}</Text>}
+              <Text className="text-muted-foreground text-[11px]">{mediaConfig.label}</Text>
+              {session.year && (
+                <Text className="text-muted-foreground text-[11px]">· {session.year}</Text>
+              )}
             </View>
-            <View style={styles.mediaTitleRow}>
-              <Text style={styles.mediaTitle} numberOfLines={2}>
+            <View className="flex-row items-center gap-1">
+              <Text className="text-foreground flex-1 text-[15px] font-medium" numberOfLines={2}>
                 {title.primary}
               </Text>
               {session.watched && <Eye size={14} color={colors.success} />}
             </View>
             {title.secondary && (
-              <Text style={styles.mediaSubtitle} numberOfLines={1}>
+              <Text className="text-muted-foreground mt-0.5 text-[13px]" numberOfLines={1}>
                 {title.secondary}
               </Text>
             )}
             {/* Progress inline */}
-            <View style={styles.progressContainer}>
-              <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${progress}%` }]} />
+            <View className="mt-2 flex-row items-center gap-2">
+              <View className="bg-border h-1.5 flex-1 overflow-hidden rounded-sm">
+                <View className="bg-primary h-full rounded-sm" style={{ width: `${progress}%` }} />
               </View>
-              <Text style={styles.progressText}>{progress}%</Text>
+              <Text className="text-muted-foreground w-8 text-[11px]">{progress}%</Text>
             </View>
           </View>
         </View>
 
         {/* User - Tappable */}
         <Pressable
-          style={styles.userCard}
+          className="border-border flex-row items-center gap-2 rounded-xl border p-2"
           onPress={() => router.push(`/user/${session.serverUserId}` as never)}
         >
           <UserAvatar thumbUrl={session.user.thumbUrl} username={session.user.username} size={36} />
-          <View style={styles.userInfo}>
-            <Text style={styles.userName} numberOfLines={1}>
+          <View className="min-w-0 flex-1">
+            <Text className="text-foreground text-[15px] font-medium" numberOfLines={1}>
               {session.user.identityName ?? session.user.username}
             </Text>
             {session.user.identityName && session.user.identityName !== session.user.username && (
-              <Text style={styles.userUsername}>@{session.user.username}</Text>
+              <Text className="text-muted-foreground text-xs">@{session.user.username}</Text>
             )}
-            {!session.user.identityName && <Text style={styles.userUsername}>View profile</Text>}
+            {!session.user.identityName && (
+              <Text className="text-muted-foreground text-xs">View profile</Text>
+            )}
           </View>
           <ChevronRight size={16} color={colors.text.muted.dark} />
         </Pressable>
 
         {/* Server */}
         <Section icon={Server} title="Server">
-          <View style={styles.serverRow}>
-            <Text style={styles.serverLabel}>Server</Text>
-            <View style={styles.serverValue}>
-              <Text style={[styles.serverType, { color: serverConfig.color }]}>
+          <View className="flex-row items-center justify-between">
+            <Text className="text-muted-foreground text-[13px]">Server</Text>
+            <View className="flex-row items-center gap-1">
+              <Text className="text-[13px] font-medium" style={{ color: serverConfig.color }}>
                 {serverConfig.label}
               </Text>
-              <Text style={styles.serverDot}>·</Text>
-              <Text style={styles.serverName}>{session.server.name}</Text>
+              <Text className="text-muted-foreground text-[13px]">·</Text>
+              <Text className="text-foreground text-[13px]">{session.server.name}</Text>
             </View>
           </View>
         </Section>
@@ -437,7 +448,7 @@ export default function SessionDetailScreen() {
             ) : null
           }
         >
-          <View style={styles.infoContent}>
+          <View className="gap-1">
             {startedAt && (
               <InfoRow
                 label="Started"
@@ -458,12 +469,12 @@ export default function SessionDetailScreen() {
 
         {/* Location & Network */}
         <Section icon={MapPin} title="Location">
-          <View style={styles.infoContent}>
+          <View className="gap-1">
             <InfoRow label="IP Address" value={session.ipAddress || '—'} mono />
             {locationString && (
-              <View style={styles.locationRow}>
+              <View className="flex-row items-center gap-1">
                 <Globe size={14} color={colors.text.muted.dark} />
-                <Text style={styles.locationText}>{locationString}</Text>
+                <Text className="text-foreground flex-1 text-[13px]">{locationString}</Text>
               </View>
             )}
           </View>
@@ -471,7 +482,7 @@ export default function SessionDetailScreen() {
 
         {/* Device */}
         <Section icon={Smartphone} title="Device">
-          <View style={styles.infoContent}>
+          <View className="gap-1">
             {session.platform && <InfoRow label="Platform" value={session.platform} />}
             {session.product && <InfoRow label="Product" value={session.product} />}
             {session.device && <InfoRow label="Device" value={session.device} />}
@@ -486,21 +497,21 @@ export default function SessionDetailScreen() {
           title="Stream Details"
           badge={
             <Badge variant={session.isTranscode ? 'warning' : 'secondary'}>
-              <View style={styles.streamBadgeContent}>
+              <View className="flex-row items-center gap-1">
                 {session.isTranscode ? (
                   <>
                     <Repeat2 size={12} color={colors.warning} />
-                    <Text style={styles.streamBadgeText}>Transcode</Text>
+                    <Text className="text-warning text-[11px] font-semibold">Transcode</Text>
                   </>
                 ) : session.videoDecision === 'copy' || session.audioDecision === 'copy' ? (
                   <>
                     <MonitorPlay size={12} color={colors.text.primary.dark} />
-                    <Text style={styles.streamBadgeTextSecondary}>Direct Stream</Text>
+                    <Text className="text-foreground text-[11px] font-semibold">Direct Stream</Text>
                   </>
                 ) : (
                   <>
                     <MonitorPlay size={12} color={colors.text.primary.dark} />
-                    <Text style={styles.streamBadgeTextSecondary}>Direct Play</Text>
+                    <Text className="text-foreground text-[11px] font-semibold">Direct Play</Text>
                   </>
                 )}
               </View>
@@ -530,303 +541,21 @@ export default function SessionDetailScreen() {
 
         {/* Transcode reason tooltip equivalent */}
         {session.isTranscode && hasTranscodeReason && (
-          <View style={styles.transcodeReasonCard}>
-            <Text style={styles.transcodeReasonLabel}>Transcode Reason</Text>
-            <Text style={styles.transcodeReasonText}>{transcodeReasonText}</Text>
+          <View
+            className="rounded-xl border p-2"
+            style={{
+              backgroundColor: withAlpha(colors.warning, '10'),
+              borderColor: withAlpha(colors.warning, '30'),
+            }}
+          >
+            <Text className="text-warning mb-1 text-[11px] font-semibold">Transcode Reason</Text>
+            <Text className="text-foreground text-xs">{transcodeReasonText}</Text>
           </View>
         )}
 
         {/* Bottom padding */}
-        <View style={styles.bottomPadding} />
+        <View className="h-6" />
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background.dark,
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: colors.background.dark,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  errorContainer: {
-    flex: 1,
-    backgroundColor: colors.background.dark,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.md,
-  },
-  errorText: {
-    color: colors.error,
-    textAlign: 'center',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: spacing.sm,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    flex: 1,
-  },
-  headerTitle: {
-    color: colors.text.primary.dark,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  terminateButton: {
-    width: 32,
-    height: 32,
-    borderRadius: borderRadius.full,
-    backgroundColor: withAlpha(colors.error, '15'),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  // Media Card
-  mediaCard: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border.dark,
-    borderRadius: borderRadius.lg,
-    padding: spacing.sm,
-  },
-  poster: {
-    width: 56,
-    height: 80,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.surface.dark,
-  },
-  mediaInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  mediaTypeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 4,
-  },
-  mediaTypeText: {
-    color: colors.text.muted.dark,
-    fontSize: 11,
-  },
-  mediaTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  mediaTitle: {
-    color: colors.text.primary.dark,
-    fontSize: 15,
-    fontWeight: '500',
-    flex: 1,
-  },
-  mediaSubtitle: {
-    color: colors.text.muted.dark,
-    fontSize: 13,
-    marginTop: 2,
-  },
-  progressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  progressBar: {
-    flex: 1,
-    height: 6,
-    backgroundColor: colors.border.dark,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: colors.cyan.core,
-    borderRadius: 3,
-  },
-  progressText: {
-    color: colors.text.muted.dark,
-    fontSize: 11,
-    width: 32,
-  },
-  // User Card
-  userCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border.dark,
-    borderRadius: borderRadius.lg,
-    padding: spacing.sm,
-  },
-  userInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  userName: {
-    color: colors.text.primary.dark,
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  userUsername: {
-    color: colors.text.muted.dark,
-    fontSize: 12,
-  },
-  // Section
-  section: {
-    borderWidth: 1,
-    borderColor: colors.border.dark,
-    borderRadius: borderRadius.lg,
-    padding: spacing.sm,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-  },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  sectionIconContainer: {
-    width: 24,
-    height: 24,
-    borderRadius: borderRadius.full,
-    backgroundColor: withAlpha(colors.cyan.core, '15'),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sectionTitle: {
-    color: colors.text.primary.dark,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  infoContent: {
-    gap: spacing.xs,
-  },
-  // Info Row
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  infoLabel: {
-    color: colors.text.muted.dark,
-    fontSize: 13,
-  },
-  infoValueContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  infoValue: {
-    color: colors.text.primary.dark,
-    fontSize: 13,
-  },
-  infoSubValue: {
-    color: colors.text.muted.dark,
-    fontSize: 11,
-  },
-  monoText: {
-    fontFamily: 'monospace',
-    fontSize: 11,
-  },
-  // Server Row
-  serverRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  serverLabel: {
-    color: colors.text.muted.dark,
-    fontSize: 13,
-  },
-  serverValue: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  serverType: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  serverDot: {
-    color: colors.text.muted.dark,
-    fontSize: 13,
-  },
-  serverName: {
-    color: colors.text.primary.dark,
-    fontSize: 13,
-  },
-  // Location Row
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  locationText: {
-    color: colors.text.primary.dark,
-    fontSize: 13,
-    flex: 1,
-  },
-  // Stream Badge
-  streamBadgeContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  streamBadgeText: {
-    color: colors.warning,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  streamBadgeTextSecondary: {
-    color: colors.text.primary.dark,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  // Transcode Reason
-  transcodeReasonCard: {
-    backgroundColor: withAlpha(colors.warning, '10'),
-    borderWidth: 1,
-    borderColor: withAlpha(colors.warning, '30'),
-    borderRadius: borderRadius.lg,
-    padding: spacing.sm,
-  },
-  transcodeReasonLabel: {
-    color: colors.warning,
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  transcodeReasonText: {
-    color: colors.text.primary.dark,
-    fontSize: 12,
-  },
-  bottomPadding: {
-    height: spacing.xl,
-  },
-});

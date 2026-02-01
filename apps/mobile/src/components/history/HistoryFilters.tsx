@@ -3,10 +3,10 @@
  * Mobile-optimized design with time range picker, search, and filter button
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Pressable, StyleSheet, TextInput } from 'react-native';
+import { View, Pressable, TextInput } from 'react-native';
 import { Search, X, SlidersHorizontal } from 'lucide-react-native';
 import { Text } from '@/components/ui/text';
-import { colors, spacing, borderRadius } from '@/lib/theme';
+import { colors } from '@/lib/theme';
 
 export type TimePeriod = '7d' | '30d' | '90d' | '1y' | 'all';
 export type MediaType = 'movie' | 'episode' | 'track' | 'live';
@@ -37,16 +37,37 @@ function TimeRangePicker({
   onChange: (value: TimePeriod) => void;
 }) {
   return (
-    <View style={styles.periodContainer}>
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: colors.surface.dark,
+        borderRadius: 8,
+        padding: 4,
+      }}
+    >
       {PERIODS.map((period) => {
         const isSelected = value === period.value;
         return (
           <Pressable
             key={period.value}
             onPress={() => onChange(period.value)}
-            style={[styles.periodButton, isSelected && styles.periodButtonSelected]}
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              borderRadius: 6,
+              backgroundColor: isSelected ? colors.card.dark : 'transparent',
+            }}
           >
-            <Text style={[styles.periodText, isSelected && styles.periodTextSelected]}>
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: '600',
+                color: isSelected ? colors.text.primary.dark : colors.text.muted.dark,
+              }}
+            >
               {period.label}
             </Text>
           </Pressable>
@@ -87,17 +108,17 @@ export function HistoryFilters({
   }, [onSearchChange]);
 
   return (
-    <View style={styles.container}>
+    <View className="mb-4 gap-2">
       {/* Time Range Picker */}
       <TimeRangePicker value={period} onChange={onPeriodChange} />
 
       {/* Search and Filter Row */}
-      <View style={styles.searchRow}>
+      <View className="flex-row gap-2">
         {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <Search size={16} color={colors.text.muted.dark} style={styles.searchIcon} />
+        <View className="bg-card h-10 flex-1 flex-row items-center rounded-lg px-2">
+          <Search size={16} color={colors.text.muted.dark} className="mr-1" />
           <TextInput
-            style={styles.searchInput}
+            className="text-foreground flex-1 py-0 text-sm"
             placeholder="Search titles, users..."
             placeholderTextColor={colors.text.muted.dark}
             value={localSearch}
@@ -106,18 +127,23 @@ export function HistoryFilters({
             autoCorrect={false}
           />
           {localSearch.length > 0 && (
-            <Pressable onPress={handleClearSearch} style={styles.clearButton}>
+            <Pressable onPress={handleClearSearch} className="p-1">
               <X size={14} color={colors.text.muted.dark} />
             </Pressable>
           )}
         </View>
 
         {/* Filter Button */}
-        <Pressable onPress={onFilterPress} style={styles.filterButton}>
+        <Pressable
+          onPress={onFilterPress}
+          className="bg-card h-10 w-11 items-center justify-center rounded-lg"
+        >
           <SlidersHorizontal size={18} color={colors.text.primary.dark} />
           {activeFilterCount > 0 && (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+            <View className="bg-primary absolute top-1 right-1 min-w-4 items-center justify-center rounded-full px-1">
+              <Text className="text-primary-foreground text-[10px] font-bold">
+                {activeFilterCount}
+              </Text>
             </View>
           )}
         </Pressable>
@@ -125,85 +151,3 @@ export function HistoryFilters({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  periodContainer: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface.dark,
-    borderRadius: borderRadius.lg,
-    padding: 3,
-  },
-  periodButton: {
-    flex: 1,
-    paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  periodButtonSelected: {
-    backgroundColor: colors.card.dark,
-  },
-  periodText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.text.muted.dark,
-  },
-  periodTextSelected: {
-    color: colors.text.primary.dark,
-  },
-  searchRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  searchContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface.dark,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.sm,
-    height: 40,
-  },
-  searchIcon: {
-    marginRight: spacing.xs,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.text.primary.dark,
-    paddingVertical: 0,
-  },
-  clearButton: {
-    padding: 4,
-  },
-  filterButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface.dark,
-    borderRadius: borderRadius.md,
-    width: 44,
-    height: 40,
-  },
-  filterBadge: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: colors.cyan.core,
-    borderRadius: borderRadius.full,
-    minWidth: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  filterBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.background.dark,
-  },
-});

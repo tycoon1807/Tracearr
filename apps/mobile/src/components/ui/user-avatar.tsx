@@ -2,9 +2,8 @@
  * User avatar component with image and fallback to initials
  */
 import React from 'react';
-import { View, Image, StyleSheet } from 'react-native';
+import { View, Image } from 'react-native';
 import { Text } from './text';
-import { colors } from '@/lib/theme';
 
 interface UserAvatarProps {
   /** User's avatar URL (can be null) */
@@ -18,51 +17,26 @@ interface UserAvatarProps {
 export function UserAvatar({ thumbUrl, username, size = 40 }: UserAvatarProps) {
   const initials = username.slice(0, 2).toUpperCase();
   const fontSize = Math.max(size * 0.4, 10);
-  const borderRadiusValue = size / 2;
+  const borderRadius = size / 2;
 
   if (thumbUrl) {
     return (
       <Image
         source={{ uri: thumbUrl }}
-        style={[
-          styles.image,
-          {
-            width: size,
-            height: size,
-            borderRadius: borderRadiusValue,
-          },
-        ]}
+        style={{ width: size, height: size, borderRadius }}
+        className="bg-surface"
       />
     );
   }
 
   return (
     <View
-      style={[
-        styles.fallback,
-        {
-          width: size,
-          height: size,
-          borderRadius: borderRadiusValue,
-        },
-      ]}
+      style={{ width: size, height: size, borderRadius }}
+      className="bg-primary items-center justify-center"
     >
-      <Text style={[styles.initials, { fontSize }]}>{initials}</Text>
+      <Text style={{ fontSize }} className="text-foreground font-semibold">
+        {initials}
+      </Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  image: {
-    backgroundColor: colors.surface.dark,
-  },
-  fallback: {
-    backgroundColor: colors.cyan.dark,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  initials: {
-    fontWeight: '600',
-    color: colors.text.primary.dark,
-  },
-});

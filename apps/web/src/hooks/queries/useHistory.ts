@@ -91,3 +91,15 @@ export function useFilterOptions(params?: { serverId?: string; startDate?: Date;
     staleTime: 1000 * 60 * 5, // 5 minutes - filter options don't change often
   });
 }
+
+/**
+ * Query for filter options for the rules builder.
+ * Returns all countries (with hasSessions indicator) and servers.
+ */
+export function useRulesFilterOptions() {
+  return useQuery({
+    queryKey: ['sessions', 'filter-options', 'rules'],
+    queryFn: () => api.sessions.rulesFilterOptions(),
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}

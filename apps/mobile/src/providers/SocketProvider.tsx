@@ -8,8 +8,8 @@ import type { Socket } from 'socket.io-client';
 import { AppState } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
-import { storage } from '../lib/storage';
-import { useAuthStore } from '../lib/authStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useAuthStateStore, getAccessToken } from '../lib/authStateStore';
 import type {
   ServerToClientEvents,
   ClientToServerEvents,
@@ -37,7 +37,19 @@ export function useSocket() {
 }
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, activeServerId, serverUrl } = useAuthStore();
+  // Use the single-server auth state store with shallow compare
+  const { server, tokenStatus, connectionState, isInitializing } = useAuthStateStore(
+    useShallow((s) => ({
+      server: s.server,
+      tokenStatus: s.tokenStatus,
+      connectionState: s.connectionState,
+      isInitializing: s.isInitializing,
+    }))
+  );
+  const isAuthenticated = server !== null && tokenStatus !== 'revoked';
+  const serverId = server?.id ?? null;
+  const serverUrl = server?.url ?? null;
+
   const queryClient = useQueryClient();
   const socketRef = useRef<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
   const [socket, setSocket] = useState<Socket<ServerToClientEvents, ClientToServerEvents> | null>(
@@ -48,10 +60,18 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const connectedServerIdRef = useRef<string | null>(null);
 
   const connectSocket = useCallback(async () => {
-    if (!isAuthenticated || !serverUrl || !activeServerId) return;
+    // Don't try to connect during initialization or if not authenticated
+    if (isInitializing || !isAuthenticated || !serverUrl || !serverId) {
+      return;
+    }
+
+    // Don't connect if already unauthenticated
+    if (connectionState === 'unauthenticated') {
+      return;
+    }
 
     // If already connected to this backend, skip
-    if (connectedServerIdRef.current === activeServerId && socketRef.current?.connected) {
+    if (connectedServerIdRef.current === serverId && socketRef.current?.connected) {
       return;
     }
 
@@ -62,13 +82,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setSocket(null);
     }
 
-    const credentials = await storage.getServerCredentials(activeServerId);
-    if (!credentials) return;
+    const accessToken = await getAccessToken();
+    if (!accessToken) return;
 
-    connectedServerIdRef.current = activeServerId;
+    connectedServerIdRef.current = serverId;
 
     const newSocket: Socket<ServerToClientEvents, ClientToServerEvents> = io(serverUrl, {
-      auth: { token: credentials.accessToken },
+      auth: { token: accessToken },
       transports: ['websocket'],
       reconnection: true,
       reconnectionAttempts: 5,
@@ -77,20 +97,29 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on('connect', () => {
-      console.log('Socket connected');
       setIsConnected(true);
       // Subscribe to session updates
       newSocket.emit('subscribe:sessions');
     });
 
-    newSocket.on('disconnect', (reason) => {
-      console.log('Socket disconnected:', reason);
+    newSocket.on('disconnect', (_reason) => {
       setIsConnected(false);
     });
 
     newSocket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error.message);
       setIsConnected(false);
+
+      // Check if this is an authentication failure
+      if (error.message === 'Authentication failed' || error.message === 'Invalid token') {
+        // Stop reconnection attempts immediately
+        newSocket.disconnect();
+        socketRef.current = null;
+        setSocket(null);
+        connectedServerIdRef.current = null;
+
+        // Use unified auth failure handler (synchronous, prevents duplicate handling)
+        useAuthStateStore.getState().handleAuthFailure();
+      }
     });
 
     // Handle real-time events
@@ -122,11 +151,27 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     socketRef.current = newSocket;
     setSocket(newSocket);
-  }, [isAuthenticated, serverUrl, activeServerId, queryClient]);
+  }, [isInitializing, isAuthenticated, serverUrl, serverId, queryClient, connectionState]);
 
-  // Connect/disconnect based on auth state
+  // Connect/disconnect based on auth state and connection state
   useEffect(() => {
-    if (isAuthenticated && serverUrl && activeServerId) {
+    // Don't try to connect during initialization
+    if (isInitializing) {
+      return;
+    }
+
+    // Don't try to connect if we're in unauthenticated state (token was revoked)
+    if (connectionState === 'unauthenticated') {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+        setSocket(null);
+        connectedServerIdRef.current = null;
+      }
+      return;
+    }
+
+    if (isAuthenticated && serverUrl && serverId) {
       void connectSocket();
     } else if (socketRef.current) {
       socketRef.current.disconnect();
@@ -143,12 +188,18 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         connectedServerIdRef.current = null;
       }
     };
-  }, [isAuthenticated, serverUrl, activeServerId, connectSocket]);
+  }, [isInitializing, isAuthenticated, serverUrl, serverId, connectSocket, connectionState]);
 
   // Handle app state changes (background/foreground)
   useEffect(() => {
     const handleAppStateChange = (nextState: AppStateStatus) => {
-      if (nextState === 'active' && isAuthenticated && !isConnected) {
+      const currentConnectionState = useAuthStateStore.getState().connectionState;
+      if (
+        nextState === 'active' &&
+        isAuthenticated &&
+        !isConnected &&
+        currentConnectionState !== 'unauthenticated'
+      ) {
         // Reconnect when app comes to foreground
         void connectSocket();
       }

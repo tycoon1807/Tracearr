@@ -3,81 +3,76 @@
 @import "tailwindcss/utilities.css";
 @import "nativewind/theme";
 
-/* Tracearr Mobile Theme - Aligned with Web Dark Mode
-   Note: Mobile uses static HSL values since NativeWind processes @theme at build time.
-   Web uses dynamic --accent-hue for runtime theme switching. */
+/* Tailwind v4 @theme block - creates utility classes at build time */
 @theme {
-  /* Brand Colors - Cyan accent (hue 187) */
-  --color-cyan-core: hsl(187 80% 50%);
-  --color-cyan-deep: hsl(187 86% 42%);
-  --color-cyan-dark: hsl(187 85% 31%);
-  --color-blue-core: hsl(213 62% 11%);
-  --color-blue-steel: hsl(213 47% 17%);
-  --color-blue-soft: hsl(212 49% 24%);
+  --color-background: #09090B;
+  --color-foreground: #FAFAFA;
+  --color-card: #09090B;
+  --color-card-foreground: #FAFAFA;
+  --color-popover: #09090B;
+  --color-popover-foreground: #FAFAFA;
+  --color-primary: #18D1E7;
+  --color-primary-foreground: #18181B;
+  --color-secondary: #27272A;
+  --color-secondary-foreground: #FAFAFA;
+  --color-muted: #27272A;
+  --color-muted-foreground: #A1A1AA;
+  --color-accent: #27272A;
+  --color-accent-foreground: #FAFAFA;
+  --color-destructive: #B91C1C;
+  --color-destructive-foreground: #FAFAFA;
+  --color-border: #27272A;
+  --color-input: #27272A;
+  --color-ring: #18D1E7;
+  --color-surface: #18181B;
+  --color-success: #22C55E;
+  --color-warning: #F59E0B;
+  --color-danger: #DC2626;
+  --color-icon: #A1A1AA;
+  --color-icon-active: #18D1E7;
+  --color-icon-danger: #FCA5A5;
+  --color-cyan-core: #18D1E7;
+  --color-cyan-deep: #0891B2;
+  --color-cyan-dark: #0E7490;
+  --color-blue-core: #0B1A2E;
+  --color-blue-steel: #162840;
+  --color-blue-soft: #1E3A5C;
+  --color-chart-1: #18D1E7;
+  --color-chart-2: #22D3EE;
+  --color-chart-3: #6B7280;
+  --color-chart-4: #FBBF24;
+  --color-chart-5: #EF4444;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
 
-  /* Background colors - shadcn neutral dark mode */
-  --color-background: hsl(240 10% 4%);
-  --color-foreground: hsl(0 0% 98%);
-  --color-card: hsl(240 10% 4%);
-  --color-card-foreground: hsl(0 0% 98%);
-  --color-surface: hsl(240 6% 10%);
-  --color-popover: hsl(240 10% 4%);
-  --color-popover-foreground: hsl(0 0% 98%);
-
-  /* Muted colors */
-  --color-muted: hsl(240 4% 16%);
-  --color-muted-foreground: hsl(240 5% 65%);
-
-  /* Primary (cyan accent) */
-  --color-primary: hsl(187 80% 50%);
-  --color-primary-foreground: hsl(240 6% 10%);
-
-  /* Secondary */
-  --color-secondary: hsl(240 4% 16%);
-  --color-secondary-foreground: hsl(0 0% 98%);
-
-  /* Accent (neutral for hover states) */
-  --color-accent: hsl(240 4% 16%);
-  --color-accent-foreground: hsl(0 0% 98%);
-
-  /* Form inputs */
-  --color-input: hsl(240 4% 16%);
-  --color-ring: hsl(187 80% 50%);
-  --color-border: hsl(240 4% 16%);
-
-  /* Semantic colors */
-  --color-destructive: hsl(0 62% 50%);
-  --color-destructive-foreground: hsl(0 0% 98%);
-  --color-success: hsl(142 76% 36%);
-  --color-warning: hsl(38 92% 50%);
-  --color-danger: hsl(0 62% 50%);
-
-  /* Icon colors */
-  --color-icon: hsl(240 5% 65%);
-  --color-icon-active: hsl(187 80% 50%);
-  --color-icon-danger: hsl(0 100% 65%);
-
-  /* Chart colors */
-  --color-chart-1: hsl(187 80% 50%);
-  --color-chart-2: hsl(187 70% 60%);
-  --color-chart-3: hsl(197 37% 50%);
-  --color-chart-4: hsl(43 80% 55%);
-  --color-chart-5: hsl(0 75% 55%);
-
-  /* Border radius */
-  --radius: 0.5rem;
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
-
-  /* Responsive breakpoints - optimized for mobile devices
-     Base (0px)   → Phone portrait (single column)
-     sm (480px)   → Large phone / phone landscape
-     md (768px)   → Tablet portrait (2 columns) - iPad Mini+
-     lg (1024px)  → Tablet landscape / large tablet (3+ columns)
-     xl (1280px)  → Extra large tablets in landscape */
-  --breakpoint-sm: 480px;
-  --breakpoint-md: 768px;
-  --breakpoint-lg: 1024px;
-  --breakpoint-xl: 1280px;
+/* Runtime defaults - NativeWind needs these for CSS variable resolution */
+:root {
+  --color-background: #09090B;
+  --color-foreground: #FAFAFA;
+  --color-card: #09090B;
+  --color-card-foreground: #FAFAFA;
+  --color-popover: #09090B;
+  --color-popover-foreground: #FAFAFA;
+  --color-primary: #18D1E7;
+  --color-primary-foreground: #18181B;
+  --color-secondary: #27272A;
+  --color-secondary-foreground: #FAFAFA;
+  --color-muted: #27272A;
+  --color-muted-foreground: #A1A1AA;
+  --color-accent: #27272A;
+  --color-accent-foreground: #FAFAFA;
+  --color-destructive: #B91C1C;
+  --color-destructive-foreground: #FAFAFA;
+  --color-border: #27272A;
+  --color-input: #27272A;
+  --color-ring: #18D1E7;
+  --color-surface: #18181B;
+  --color-success: #22C55E;
+  --color-warning: #F59E0B;
+  --color-danger: #DC2626;
+  --color-icon: #A1A1AA;
+  --color-icon-active: #18D1E7;
+  --color-icon-danger: #FCA5A5;
 }

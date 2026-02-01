@@ -3,7 +3,7 @@
  * Uses @gorhom/bottom-sheet for native-feeling filter interface
  */
 import React, { useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
-import { View, Pressable, ScrollView, StyleSheet, Image } from 'react-native';
+import { View, Pressable, ScrollView, Image, type ViewStyle } from 'react-native';
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetScrollView,
@@ -24,7 +24,7 @@ import {
   ChevronRight,
 } from 'lucide-react-native';
 import { Text } from '@/components/ui/text';
-import { colors, spacing, borderRadius } from '@/lib/theme';
+import { ACCENT_COLOR, colors } from '@/lib/theme';
 import type { HistoryFilterOptions, UserFilterOption, FilterOptionItem } from '@tracearr/shared';
 
 export type MediaType = 'movie' | 'episode' | 'track' | 'live';
@@ -211,18 +211,51 @@ export const FilterBottomSheet = forwardRef<FilterBottomSheetRef, FilterBottomSh
       }
 
       return (
-        <View style={styles.sectionHeader}>
-          <Pressable onPress={() => setActiveSection('main')} style={styles.backButton}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingHorizontal: 16,
+            paddingVertical: 16,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border.dark,
+            backgroundColor: colors.card.dark,
+          }}
+        >
+          <Pressable
+            onPress={() => setActiveSection('main')}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 4,
+              paddingRight: 8,
+            }}
+          >
             <ChevronRight
               size={20}
-              color={colors.text.primary.dark}
+              color={ACCENT_COLOR}
               style={{ transform: [{ rotate: '180deg' }] }}
             />
+            <Text style={{ color: ACCENT_COLOR, fontSize: 15, marginLeft: 4 }}>Back</Text>
           </Pressable>
-          <Text style={styles.sectionTitle}>{title}</Text>
+          <Text
+            style={{
+              flex: 1,
+              fontSize: 18,
+              fontWeight: '600',
+              color: colors.text.primary.dark,
+              textAlign: 'center',
+              marginRight: 60,
+            }}
+          >
+            {title}
+          </Text>
           {count > 0 && (
-            <Pressable onPress={() => clearSection(section)} style={styles.clearSectionButton}>
-              <Text style={styles.clearSectionText}>Clear ({count})</Text>
+            <Pressable
+              onPress={() => clearSection(section)}
+              style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+            >
+              <Text style={{ color: ACCENT_COLOR, fontSize: 13 }}>Clear ({count})</Text>
             </Pressable>
           )}
         </View>
@@ -238,24 +271,50 @@ export const FilterBottomSheet = forwardRef<FilterBottomSheetRef, FilterBottomSh
         <Pressable
           key={user.id}
           onPress={() => toggleUser(user.id)}
-          style={[styles.listItem, isSelected && styles.listItemSelected]}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingVertical: 14,
+            paddingHorizontal: 16,
+            backgroundColor: isSelected ? `${ACCENT_COLOR}10` : 'transparent',
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border.dark,
+          }}
         >
-          <View style={styles.userAvatar}>
-            {user.thumbUrl ? (
-              <Image source={{ uri: user.thumbUrl }} style={styles.avatarImage} />
-            ) : (
-              <View style={styles.avatarPlaceholder}>
-                <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() ?? '?'}</Text>
-              </View>
-            )}
-          </View>
+          {user.thumbUrl ? (
+            <Image
+              source={{ uri: user.thumbUrl }}
+              style={{ width: 36, height: 36, borderRadius: 18, marginRight: 12 }}
+            />
+          ) : (
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                marginRight: 12,
+                backgroundColor: colors.surface.dark,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ color: colors.text.muted.dark, fontSize: 14, fontWeight: '600' }}>
+                {displayName[0]?.toUpperCase() ?? '?'}
+              </Text>
+            </View>
+          )}
           <Text
-            style={[styles.listItemText, isSelected && styles.listItemTextSelected]}
             numberOfLines={1}
+            style={{
+              flex: 1,
+              fontSize: 15,
+              color: isSelected ? ACCENT_COLOR : colors.text.primary.dark,
+              fontWeight: isSelected ? '500' : '400',
+            }}
           >
             {displayName}
           </Text>
-          {isSelected && <Check size={18} color={colors.cyan.core} />}
+          {isSelected && <Check size={20} color={ACCENT_COLOR} />}
         </Pressable>
       );
     };
@@ -269,170 +328,384 @@ export const FilterBottomSheet = forwardRef<FilterBottomSheetRef, FilterBottomSh
       <Pressable
         key={item.value}
         onPress={onToggle}
-        style={[styles.listItem, isSelected && styles.listItemSelected]}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingVertical: 14,
+          paddingHorizontal: 16,
+          backgroundColor: isSelected ? `${ACCENT_COLOR}10` : 'transparent',
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border.dark,
+        }}
       >
         <Text
-          style={[styles.listItemText, isSelected && styles.listItemTextSelected]}
           numberOfLines={1}
+          style={{
+            flex: 1,
+            fontSize: 15,
+            color: isSelected ? ACCENT_COLOR : colors.text.primary.dark,
+            fontWeight: isSelected ? '500' : '400',
+          }}
         >
           {item.value}
         </Text>
-        <View style={styles.listItemRight}>
-          <Text style={styles.countBadge}>{item.count}</Text>
-          {isSelected && <Check size={18} color={colors.cyan.core} />}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View
+            style={{
+              backgroundColor: colors.surface.dark,
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 10,
+            }}
+          >
+            <Text style={{ color: colors.text.muted.dark, fontSize: 12, fontWeight: '500' }}>
+              {item.count}
+            </Text>
+          </View>
+          {isSelected && <Check size={20} color={ACCENT_COLOR} />}
         </View>
       </Pressable>
     );
 
+    // Close the bottom sheet
+    const handleDone = useCallback(() => {
+      bottomSheetRef.current?.close();
+    }, []);
+
+    // Navigation row component
+    const renderNavRow = (
+      icon: React.ElementType,
+      label: string,
+      count: number,
+      onPress: () => void
+    ) => {
+      const Icon = icon;
+      return (
+        <Pressable
+          onPress={onPress}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingVertical: 14,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border.dark,
+          }}
+        >
+          <Icon size={20} color={colors.icon.default} />
+          <Text style={{ flex: 1, fontSize: 15, color: colors.text.primary.dark, marginLeft: 12 }}>
+            {label}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {count > 0 && (
+              <View
+                style={{
+                  minWidth: 22,
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 11,
+                  backgroundColor: ACCENT_COLOR,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>{count}</Text>
+              </View>
+            )}
+            <ChevronRight size={18} color={colors.icon.default} />
+          </View>
+        </Pressable>
+      );
+    };
+
     // Main filter menu
     const renderMainMenu = () => (
-      <BottomSheetScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Filters</Text>
-          {activeFilterCount > 0 && (
-            <Pressable onPress={clearAllFilters} style={styles.clearAllButton}>
-              <X size={14} color={colors.text.muted.dark} />
-              <Text style={styles.clearAllText}>Clear all</Text>
-            </Pressable>
-          )}
-        </View>
-
-        {/* Sub-menu navigation items */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Filter by</Text>
-
-          {/* Users */}
-          <Pressable onPress={() => setActiveSection('users')} style={styles.menuItem}>
-            <User size={18} color={colors.text.muted.dark} />
-            <Text style={styles.menuItemText}>Users</Text>
-            <View style={styles.menuItemRight}>
-              {filters.serverUserIds.length > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{filters.serverUserIds.length}</Text>
-                </View>
-              )}
-              <ChevronRight size={18} color={colors.text.muted.dark} />
-            </View>
-          </Pressable>
-
-          {/* Platforms */}
-          <Pressable onPress={() => setActiveSection('platforms')} style={styles.menuItem}>
-            <Monitor size={18} color={colors.text.muted.dark} />
-            <Text style={styles.menuItemText}>Platforms</Text>
-            <View style={styles.menuItemRight}>
-              {filters.platforms.length > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{filters.platforms.length}</Text>
-                </View>
-              )}
-              <ChevronRight size={18} color={colors.text.muted.dark} />
-            </View>
-          </Pressable>
-
-          {/* Countries */}
-          <Pressable onPress={() => setActiveSection('countries')} style={styles.menuItem}>
-            <Globe size={18} color={colors.text.muted.dark} />
-            <Text style={styles.menuItemText}>Countries</Text>
-            <View style={styles.menuItemRight}>
-              {filters.geoCountries.length > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{filters.geoCountries.length}</Text>
-                </View>
-              )}
-              <ChevronRight size={18} color={colors.text.muted.dark} />
-            </View>
-          </Pressable>
-        </View>
-
-        {/* Media Types - inline checkboxes */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Media Type</Text>
-          <View style={styles.checkboxGrid}>
-            {MEDIA_TYPES.map(({ value, label, icon: Icon }) => {
-              const isSelected = filters.mediaTypes.includes(value);
-              return (
-                <Pressable
-                  key={value}
-                  onPress={() => toggleMediaType(value)}
-                  style={[styles.checkboxItem, isSelected && styles.checkboxItemSelected]}
-                >
-                  <Icon size={16} color={isSelected ? colors.cyan.core : colors.text.muted.dark} />
-                  <Text style={[styles.checkboxText, isSelected && styles.checkboxTextSelected]}>
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+      <View style={{ flex: 1 }}>
+        <BottomSheetScrollView contentContainerStyle={scrollContent}>
+          {/* Header */}
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingHorizontal: 16,
+              paddingTop: 8,
+              paddingBottom: 16,
+              borderBottomWidth: 1,
+              borderBottomColor: colors.border.dark,
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: '600', color: colors.text.primary.dark }}>
+              Filters
+            </Text>
+            {activeFilterCount > 0 && (
+              <Pressable
+                onPress={clearAllFilters}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4 }}
+              >
+                <X size={14} color={colors.text.muted.dark} />
+                <Text style={{ color: colors.text.muted.dark, fontSize: 13 }}>Clear all</Text>
+              </Pressable>
+            )}
           </View>
-        </View>
 
-        {/* Quality/Transcode - inline checkboxes */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Quality</Text>
-          <View style={styles.checkboxGrid}>
-            {TRANSCODE_OPTIONS.map(({ value, label, icon: Icon }) => {
-              const isSelected = filters.transcodeDecisions.includes(value);
-              return (
-                <Pressable
-                  key={value}
-                  onPress={() => toggleTranscode(value)}
-                  style={[styles.checkboxItem, isSelected && styles.checkboxItemSelected]}
-                >
-                  <Icon size={16} color={isSelected ? colors.cyan.core : colors.text.muted.dark} />
-                  <Text style={[styles.checkboxText, isSelected && styles.checkboxTextSelected]}>
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+          {/* Sub-menu navigation items */}
+          <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+            <Text
+              style={{
+                color: colors.text.muted.dark,
+                fontSize: 11,
+                fontWeight: '600',
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+                marginBottom: 8,
+              }}
+            >
+              Filter by
+            </Text>
+
+            {renderNavRow(User, 'Users', filters.serverUserIds.length, () =>
+              setActiveSection('users')
+            )}
+            {renderNavRow(Monitor, 'Platforms', filters.platforms.length, () =>
+              setActiveSection('platforms')
+            )}
+            {renderNavRow(Globe, 'Countries', filters.geoCountries.length, () =>
+              setActiveSection('countries')
+            )}
           </View>
+
+          {/* Media Types - 2x2 grid */}
+          <View style={{ paddingHorizontal: 16, paddingTop: 20 }}>
+            <Text
+              style={{
+                color: colors.text.muted.dark,
+                fontSize: 11,
+                fontWeight: '600',
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+                marginBottom: 10,
+              }}
+            >
+              Media Type
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {MEDIA_TYPES.map(({ value, label, icon: Icon }) => {
+                const isSelected = filters.mediaTypes.includes(value);
+                return (
+                  <Pressable
+                    key={value}
+                    onPress={() => toggleMediaType(value)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                      paddingVertical: 10,
+                      paddingHorizontal: 14,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: isSelected ? ACCENT_COLOR : colors.border.dark,
+                      backgroundColor: isSelected ? `${ACCENT_COLOR}15` : colors.surface.dark,
+                      minWidth: '47%',
+                    }}
+                  >
+                    <Icon size={18} color={isSelected ? ACCENT_COLOR : colors.text.muted.dark} />
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        fontWeight: '500',
+                        color: isSelected ? ACCENT_COLOR : colors.text.primary.dark,
+                      }}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Quality/Transcode - row of 3 */}
+          <View style={{ paddingHorizontal: 16, paddingTop: 20 }}>
+            <Text
+              style={{
+                color: colors.text.muted.dark,
+                fontSize: 11,
+                fontWeight: '600',
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+                marginBottom: 10,
+              }}
+            >
+              Playback Quality
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {TRANSCODE_OPTIONS.map(({ value, label, icon: Icon }) => {
+                const isSelected = filters.transcodeDecisions.includes(value);
+                return (
+                  <Pressable
+                    key={value}
+                    onPress={() => toggleTranscode(value)}
+                    style={{
+                      flex: 1,
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 6,
+                      paddingVertical: 12,
+                      paddingHorizontal: 8,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: isSelected ? ACCENT_COLOR : colors.border.dark,
+                      backgroundColor: isSelected ? `${ACCENT_COLOR}15` : colors.surface.dark,
+                    }}
+                  >
+                    <Icon size={20} color={isSelected ? ACCENT_COLOR : colors.text.muted.dark} />
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: '500',
+                        color: isSelected ? ACCENT_COLOR : colors.text.primary.dark,
+                        textAlign: 'center',
+                      }}
+                      numberOfLines={1}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </BottomSheetScrollView>
+
+        {/* Done button - sticky footer */}
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            paddingBottom: 24,
+            borderTopWidth: 1,
+            borderTopColor: colors.border.dark,
+            backgroundColor: colors.card.dark,
+          }}
+        >
+          <Pressable
+            onPress={handleDone}
+            style={{
+              backgroundColor: ACCENT_COLOR,
+              paddingVertical: 14,
+              borderRadius: 10,
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>
+              {activeFilterCount > 0 ? `Apply ${activeFilterCount} Filters` : 'Done'}
+            </Text>
+          </Pressable>
         </View>
-      </BottomSheetScrollView>
+      </View>
+    );
+
+    // Done button for sub-sections
+    const renderDoneButton = () => (
+      <View
+        style={{
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+          paddingBottom: 24,
+          borderTopWidth: 1,
+          borderTopColor: colors.border.dark,
+          backgroundColor: colors.card.dark,
+        }}
+      >
+        <Pressable
+          onPress={handleDone}
+          style={{
+            backgroundColor: ACCENT_COLOR,
+            paddingVertical: 14,
+            borderRadius: 10,
+            alignItems: 'center',
+          }}
+        >
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>
+            {activeFilterCount > 0 ? `Apply ${activeFilterCount} Filters` : 'Done'}
+          </Text>
+        </Pressable>
+      </View>
     );
 
     // Users sub-menu
     const renderUsersSection = () => (
-      <View style={styles.subSection}>
+      <View style={{ flex: 1 }}>
         {renderSectionHeader('Users', 'users')}
-        <ScrollView contentContainerStyle={styles.listContent}>
+        <ScrollView contentContainerStyle={listContent} style={{ flex: 1 }}>
           {sortedUsers.map(renderUserItem)}
-          {sortedUsers.length === 0 && <Text style={styles.emptyText}>No users available</Text>}
+          {sortedUsers.length === 0 && (
+            <Text
+              style={{
+                color: colors.text.muted.dark,
+                textAlign: 'center',
+                paddingVertical: 32,
+                fontSize: 14,
+              }}
+            >
+              No users available
+            </Text>
+          )}
         </ScrollView>
+        {renderDoneButton()}
       </View>
     );
 
     // Platforms sub-menu
     const renderPlatformsSection = () => (
-      <View style={styles.subSection}>
+      <View style={{ flex: 1 }}>
         {renderSectionHeader('Platforms', 'platforms')}
-        <ScrollView contentContainerStyle={styles.listContent}>
+        <ScrollView contentContainerStyle={listContent} style={{ flex: 1 }}>
           {filterOptions?.platforms?.map((item) =>
             renderFilterItem(item, filters.platforms.includes(item.value), () =>
               togglePlatform(item.value)
             )
           )}
           {(!filterOptions?.platforms || filterOptions.platforms.length === 0) && (
-            <Text style={styles.emptyText}>No platforms available</Text>
+            <Text
+              style={{
+                color: colors.text.muted.dark,
+                textAlign: 'center',
+                paddingVertical: 32,
+                fontSize: 14,
+              }}
+            >
+              No platforms available
+            </Text>
           )}
         </ScrollView>
+        {renderDoneButton()}
       </View>
     );
 
     // Countries sub-menu
     const renderCountriesSection = () => (
-      <View style={styles.subSection}>
+      <View style={{ flex: 1 }}>
         {renderSectionHeader('Countries', 'countries')}
-        <ScrollView contentContainerStyle={styles.listContent}>
+        <ScrollView contentContainerStyle={listContent} style={{ flex: 1 }}>
           {filterOptions?.countries?.map((item) =>
             renderFilterItem(item, filters.geoCountries.includes(item.value), () =>
               toggleCountry(item.value)
             )
           )}
           {(!filterOptions?.countries || filterOptions.countries.length === 0) && (
-            <Text style={styles.emptyText}>No countries available</Text>
+            <Text
+              style={{
+                color: colors.text.muted.dark,
+                textAlign: 'center',
+                paddingVertical: 32,
+                fontSize: 14,
+              }}
+            >
+              No countries available
+            </Text>
           )}
         </ScrollView>
+        {renderDoneButton()}
       </View>
     );
 
@@ -444,8 +717,8 @@ export const FilterBottomSheet = forwardRef<FilterBottomSheetRef, FilterBottomSh
         enablePanDownToClose
         backdropComponent={renderBackdrop}
         onChange={handleSheetChange}
-        backgroundStyle={styles.bottomSheetBackground}
-        handleIndicatorStyle={styles.handleIndicator}
+        backgroundStyle={bottomSheetBackground}
+        handleIndicatorStyle={handleIndicator}
       >
         {activeSection === 'main' && renderMainMenu()}
         {activeSection === 'users' && renderUsersSection()}
@@ -458,206 +731,27 @@ export const FilterBottomSheet = forwardRef<FilterBottomSheetRef, FilterBottomSh
 
 FilterBottomSheet.displayName = 'FilterBottomSheet';
 
-const styles = StyleSheet.create({
-  bottomSheetBackground: {
-    backgroundColor: colors.surface.dark,
-    borderTopLeftRadius: borderRadius.xl,
-    borderTopRightRadius: borderRadius.xl,
-  },
-  handleIndicator: {
-    backgroundColor: colors.border.dark,
-    width: 40,
-  },
-  scrollContent: {
-    paddingBottom: spacing.xxl,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.dark,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text.primary.dark,
-  },
-  clearAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  clearAllText: {
-    fontSize: 13,
-    color: colors.text.muted.dark,
-  },
-  section: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-  },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.text.muted.dark,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: spacing.sm,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.dark,
-  },
-  menuItemText: {
-    flex: 1,
-    fontSize: 15,
-    color: colors.text.primary.dark,
-    marginLeft: spacing.sm,
-  },
-  menuItemRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  badge: {
-    backgroundColor: colors.cyan.core,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    minWidth: 22,
-    alignItems: 'center',
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.background.dark,
-  },
-  checkboxGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  checkboxItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.background.dark,
-    borderWidth: 1,
-    borderColor: colors.border.dark,
-    gap: 6,
-  },
-  checkboxItemSelected: {
-    borderColor: colors.cyan.core,
-    backgroundColor: `${colors.cyan.core}15`,
-  },
-  checkboxText: {
-    fontSize: 13,
-    color: colors.text.muted.dark,
-  },
-  checkboxTextSelected: {
-    color: colors.cyan.core,
-  },
-  // Sub-section styles
-  subSection: {
-    flex: 1,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.dark,
-  },
-  backButton: {
-    padding: spacing.xs,
-    marginRight: spacing.xs,
-  },
-  sectionTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text.primary.dark,
-  },
-  clearSectionButton: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  clearSectionText: {
-    fontSize: 13,
-    color: colors.cyan.core,
-  },
-  listContent: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.xxl,
-  },
-  listItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.dark,
-  },
-  listItemSelected: {
-    backgroundColor: `${colors.cyan.core}10`,
-  },
-  listItemText: {
-    flex: 1,
-    fontSize: 15,
-    color: colors.text.primary.dark,
-  },
-  listItemTextSelected: {
-    color: colors.cyan.core,
-    fontWeight: '500',
-  },
-  listItemRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  countBadge: {
-    fontSize: 12,
-    color: colors.text.muted.dark,
-    backgroundColor: colors.background.dark,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: borderRadius.full,
-  },
-  userAvatar: {
-    marginRight: spacing.sm,
-  },
-  avatarImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
-  avatarPlaceholder: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.background.dark,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text.muted.dark,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: colors.text.muted.dark,
-    textAlign: 'center',
-    paddingVertical: spacing.xl,
-  },
-});
+// Style constants for BottomSheet component props
+const bottomSheetBackground: ViewStyle = {
+  backgroundColor: colors.card.dark,
+  borderTopLeftRadius: 16,
+  borderTopRightRadius: 16,
+  borderTopWidth: 1,
+  borderLeftWidth: 1,
+  borderRightWidth: 1,
+  borderColor: colors.border.dark,
+};
+
+const handleIndicator: ViewStyle = {
+  backgroundColor: colors.border.dark,
+  width: 40,
+};
+
+const scrollContent: ViewStyle = {
+  paddingBottom: 48,
+};
+
+const listContent: ViewStyle = {
+  paddingHorizontal: 16,
+  paddingBottom: 48,
+};

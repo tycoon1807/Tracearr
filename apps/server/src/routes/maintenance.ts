@@ -28,8 +28,10 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     // Return list of available maintenance jobs with descriptions
     return {
       jobs: [
+        // Normalization jobs - standardize data formats
         {
           type: 'normalize_players',
+          category: 'normalization',
           name: 'Normalize Player Names',
           description:
             'Run this if you see inconsistent device names like "AndroidTv" and "Android TV", ' +
@@ -37,45 +39,32 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         },
         {
           type: 'normalize_countries',
+          category: 'normalization',
           name: 'Normalize Country Codes',
           description:
             'Run this if you see both "US" and "United States" in your history, ' +
             "or if geo restriction rules aren't matching older sessions correctly.",
         },
         {
+          type: 'normalize_codecs',
+          category: 'normalization',
+          name: 'Normalize Codec Names',
+          description:
+            'Converts all codec names to uppercase for consistency. ' +
+            'Run this if you see duplicate codecs in the Compatibility Matrix (e.g., "h264" and "H264").',
+        },
+        // Backfill jobs - fill in missing historical data
+        {
           type: 'fix_imported_progress',
+          category: 'backfill',
           name: 'Fix Imported Session Progress',
           description:
             'Run this if imported sessions from Tautulli show "0%" progress despite having watch time. ' +
             'This recalculates progress values for sessions that were imported before this was fixed.',
         },
         {
-          type: 'rebuild_timescale_views',
-          name: 'Rebuild TimescaleDB Views',
-          description:
-            'Recreates all TimescaleDB continuous aggregates and engagement views. ' +
-            'Run this after upgrading if you see database errors about missing views or columns.',
-          options: [
-            {
-              name: 'fullRefresh',
-              label: 'Include Full Historical Refresh',
-              description:
-                'Also refresh all historical data for continuous aggregates. ' +
-                'Enable this if Watch Analytics shows incorrect counts. May take several minutes for large libraries.',
-              type: 'boolean',
-              default: false,
-            },
-          ],
-        },
-        {
-          type: 'normalize_codecs',
-          name: 'Normalize Codec Names',
-          description:
-            'Converts all codec names to uppercase for consistency. ' +
-            'Run this if you see duplicate codecs in the Compatibility Matrix (e.g., "h264" and "H264").',
-        },
-        {
           type: 'backfill_user_dates',
+          category: 'backfill',
           name: 'Backfill User Activity Dates',
           description:
             'Populates joinedAt and lastActivityAt for users from session history. ' +
@@ -83,10 +72,37 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         },
         {
           type: 'backfill_library_snapshots',
+          category: 'backfill',
           name: 'Backfill Library Snapshots',
           description:
             'Creates historical library snapshots from library_items.created_at for proper deletion/upgrade tracking. ' +
             'Run this once after upgrading to enable accurate Storage Trend and Quality Evolution charts.',
+        },
+        // Cleanup jobs - database maintenance and optimization
+        {
+          type: 'rebuild_timescale_views',
+          category: 'cleanup',
+          name: 'Rebuild TimescaleDB Views',
+          description:
+            'Recreates all TimescaleDB continuous aggregates and engagement views. ' +
+            'Run this after upgrading if you see database errors about missing views or columns.',
+        },
+        {
+          type: 'full_aggregate_rebuild',
+          category: 'cleanup',
+          name: 'Full Historical Aggregate Rebuild',
+          description:
+            'Safely refreshes all continuous aggregates from the beginning of history. ' +
+            'Uses batched processing (30-day chunks) to prevent memory and file descriptor exhaustion. ' +
+            'Run this if Watch Analytics shows incorrect counts for historical data.',
+        },
+        {
+          type: 'cleanup_old_chunks',
+          category: 'cleanup',
+          name: 'Cleanup Old Chunks',
+          description:
+            'Drops old TimescaleDB chunks beyond the retention period (90 days). ' +
+            'Run this if the automatic retention job fails with "out of shared memory" errors.',
         },
       ],
     };
@@ -94,11 +110,8 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * POST /maintenance/jobs/:type - Start a maintenance job
-   *
-   * Body (optional):
-   * - fullRefresh: boolean - For rebuild_timescale_views, also refresh all historical data
    */
-  app.post<{ Params: { type: string }; Body: { fullRefresh?: boolean } }>(
+  app.post<{ Params: { type: string } }>(
     '/jobs/:type',
     { preHandler: [app.authenticate] },
     async (request, reply) => {
@@ -108,7 +121,6 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const { type } = request.params;
-      const { fullRefresh } = request.body || {};
 
       // Validate job type
       const validTypes: MaintenanceJobType[] = [
@@ -116,24 +128,18 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         'normalize_countries',
         'fix_imported_progress',
         'rebuild_timescale_views',
+        'full_aggregate_rebuild',
         'normalize_codecs',
         'backfill_user_dates',
         'backfill_library_snapshots',
+        'cleanup_old_chunks',
       ];
       if (!validTypes.includes(type as MaintenanceJobType)) {
         return reply.badRequest(`Invalid job type: ${type}`);
       }
 
-      // Build options for specific job types
-      const options =
-        type === 'rebuild_timescale_views' && fullRefresh ? { fullRefresh: true } : undefined;
-
       try {
-        const jobId = await enqueueMaintenanceJob(
-          type as MaintenanceJobType,
-          authUser.userId,
-          options
-        );
+        const jobId = await enqueueMaintenanceJob(type as MaintenanceJobType, authUser.userId);
         return {
           status: 'queued',
           jobId,

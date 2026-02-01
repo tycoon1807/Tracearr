@@ -3,13 +3,14 @@
  * Matches web UI quality with proper filtering and aggregates
  */
 import { useState, useMemo, useCallback, useRef } from 'react';
-import { View, FlatList, RefreshControl, ActivityIndicator, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, FlatList, RefreshControl, ActivityIndicator, Platform } from 'react-native';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
+import { DrawerActions, useNavigation } from '@react-navigation/native';
 import { Play } from 'lucide-react-native';
 import { api } from '@/lib/api';
 import { useMediaServer } from '@/providers/MediaServerProvider';
+import { ACCENT_COLOR, colors } from '@/lib/theme';
 import { Text } from '@/components/ui/text';
 import {
   HistoryFilters,
@@ -21,7 +22,6 @@ import {
   type FilterBottomSheetRef,
   type FilterState,
 } from '@/components/history';
-import { colors, spacing } from '@/lib/theme';
 import type { SessionWithDetails } from '@tracearr/shared';
 
 const PAGE_SIZE = 50;
@@ -48,6 +48,7 @@ function getDateRange(period: TimePeriod): { startDate: Date; endDate: Date } {
 
 export default function HistoryScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { selectedServerId } = useMediaServer();
   const filterSheetRef = useRef<FilterBottomSheetRef>(null);
 
@@ -167,117 +168,98 @@ export default function HistoryScreen() {
   const keyExtractor = useCallback((item: SessionWithDetails) => item.id, []);
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <FlatList
-        data={sessions}
-        keyExtractor={keyExtractor}
-        renderItem={renderItem}
-        ItemSeparatorComponent={HistoryRowSeparator}
-        contentContainerStyle={styles.listContent}
-        onEndReached={handleEndReached}
-        onEndReachedThreshold={0.5}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={refetch}
-            tintColor={colors.cyan.core}
-          />
-        }
-        ListHeaderComponent={
-          <View style={styles.header}>
-            {/* Filters */}
-            <HistoryFilters
-              period={period}
-              onPeriodChange={setPeriod}
-              search={search}
-              onSearchChange={setSearch}
-              activeFilterCount={activeFilterCount}
-              onFilterPress={handleFilterPress}
+    <>
+      <View style={{ flex: 1, backgroundColor: '#09090B' }}>
+        <FlatList
+          data={sessions}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          ItemSeparatorComponent={HistoryRowSeparator}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          contentInsetAdjustmentBehavior="automatic"
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.5}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetching}
+              onRefresh={refetch}
+              tintColor={ACCENT_COLOR}
             />
+          }
+          ListHeaderComponent={
+            <View className="px-4 pt-2">
+              {/* Filters */}
+              <HistoryFilters
+                period={period}
+                onPeriodChange={setPeriod}
+                search={search}
+                onSearchChange={setSearch}
+                activeFilterCount={activeFilterCount}
+                onFilterPress={handleFilterPress}
+              />
 
-            {/* Aggregates */}
-            <HistoryAggregates aggregates={aggregates} isLoading={isLoadingAggregates} />
-          </View>
-        }
-        ListFooterComponent={
-          isFetchingNextPage ? (
-            <View style={styles.footer}>
-              <ActivityIndicator size="small" color={colors.cyan.core} />
+              {/* Aggregates */}
+              <HistoryAggregates aggregates={aggregates} isLoading={isLoadingAggregates} />
             </View>
-          ) : null
-        }
-        ListEmptyComponent={
-          isLoading ? (
-            <View style={styles.empty}>
-              <ActivityIndicator size="large" color={colors.cyan.core} />
-            </View>
-          ) : (
-            <View style={styles.empty}>
-              <View style={styles.emptyIcon}>
-                <Play size={32} color={colors.text.muted.dark} />
+          }
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View className="items-center py-4">
+                <ActivityIndicator size="small" color={ACCENT_COLOR} />
               </View>
-              <Text style={styles.emptyTitle}>No History Found</Text>
-              <Text style={styles.emptySubtitle}>
-                {search || activeFilterCount > 0
-                  ? 'Try adjusting your filters'
-                  : 'Session history will appear here once users start streaming'}
-              </Text>
-            </View>
-          )
-        }
-      />
+            ) : null
+          }
+          ListEmptyComponent={
+            isLoading ? (
+              <View className="items-center py-12">
+                <ActivityIndicator size="large" color={ACCENT_COLOR} />
+              </View>
+            ) : (
+              <View className="items-center px-4 py-12">
+                <View
+                  className="mb-4 h-16 w-16 items-center justify-center rounded-full"
+                  style={{ backgroundColor: colors.surface.dark }}
+                >
+                  <Play size={28} color={colors.icon.default} />
+                </View>
+                <Text className="mb-2 text-lg font-semibold">No History Found</Text>
+                <Text className="text-muted-foreground max-w-[280px] text-center text-sm">
+                  {search || activeFilterCount > 0
+                    ? 'Try adjusting your filters'
+                    : 'Session history will appear here once users start streaming'}
+                </Text>
+              </View>
+            )
+          }
+        />
 
-      {/* Filter Bottom Sheet */}
-      <FilterBottomSheet
-        ref={filterSheetRef}
-        filterOptions={filterOptions}
-        filters={advancedFilters}
-        onFiltersChange={setAdvancedFilters}
-      />
-    </SafeAreaView>
+        {/* Filter Bottom Sheet */}
+        <FilterBottomSheet
+          ref={filterSheetRef}
+          filterOptions={filterOptions}
+          filters={advancedFilters}
+          onFiltersChange={setAdvancedFilters}
+        />
+      </View>
+
+      {/* iOS Native Toolbar */}
+      {Platform.OS === 'ios' && (
+        <>
+          <Stack.Toolbar placement="left">
+            <Stack.Toolbar.Button
+              icon="line.3.horizontal"
+              onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
+            />
+          </Stack.Toolbar>
+          <Stack.Toolbar placement="right">
+            <Stack.Toolbar.Menu icon="ellipsis">
+              <Stack.Toolbar.MenuAction icon="arrow.clockwise" onPress={() => refetch()}>
+                Refresh
+              </Stack.Toolbar.MenuAction>
+            </Stack.Toolbar.Menu>
+          </Stack.Toolbar>
+        </>
+      )}
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background.dark,
-  },
-  listContent: {
-    paddingBottom: spacing.xl,
-  },
-  header: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  footer: {
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-  },
-  empty: {
-    alignItems: 'center',
-    paddingVertical: spacing.xxl,
-    paddingHorizontal: spacing.lg,
-  },
-  emptyIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.surface.dark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.md,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.text.primary.dark,
-    marginBottom: spacing.xs,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: colors.text.muted.dark,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-});

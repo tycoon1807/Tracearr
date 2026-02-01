@@ -190,8 +190,9 @@ export function LibraryGrowthChart({
               categoryValue.includes('T') ? categoryValue : categoryValue + 'T00:00:00'
             );
             if (isNaN(date.getTime())) return '';
-            if (period === '1y' || period === 'year') {
-              return date.toLocaleDateString('en-US', { month: 'short' });
+            // Include year for longer time periods to differentiate labels
+            if (period === '1y' || period === 'year' || period === 'all') {
+              return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
             }
             return `${date.getMonth() + 1}/${date.getDate()}`;
           },

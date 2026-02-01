@@ -43,6 +43,31 @@ export type {
   AccountInactivityParams,
   RuleParams,
   Rule,
+  // Rule V2
+  Operator,
+  ConditionField,
+  ConditionValue,
+  Condition,
+  ConditionGroup,
+  RuleConditions,
+  ActionType,
+  Action,
+  CreateViolationAction,
+  LogOnlyAction,
+  NotifyAction,
+  AdjustTrustAction,
+  SetTrustAction,
+  ResetTrustAction,
+  KillStreamAction,
+  MessageClientAction,
+  NotificationChannelV2,
+  RuleActions,
+  RuleV2,
+  ActionResult,
+  VideoResolution,
+  DeviceType,
+  Platform,
+  MediaTypeEnum,
   // Violation
   ViolationSeverity,
   Violation,
@@ -77,6 +102,8 @@ export type {
   JellystatImportResult,
   // Library sync
   LibrarySyncProgress,
+  // Heavy ops coordination
+  HeavyOpsWaitingFor,
   // Maintenance jobs
   MaintenanceJobType,
   MaintenanceJobStatus,
@@ -97,7 +124,10 @@ export type {
   HistorySessionResponse,
   FilterOptionItem,
   UserFilterOption,
+  ServerFilterOption,
+  CountryOption,
   HistoryFilterOptions,
+  RulesFilterOptions,
   // Mobile
   MobileToken,
   MobileSession,
@@ -248,6 +278,13 @@ export {
   createRuleSchema,
   updateRuleSchema,
   ruleIdParamSchema,
+  // Rule V2
+  createRuleV2Schema,
+  updateRuleV2Schema,
+  // Bulk operations
+  bulkUpdateRulesSchema,
+  bulkDeleteRulesSchema,
+  bulkMigrateRulesSchema,
   // Violation
   violationSortFieldSchema,
   violationQuerySchema,
@@ -301,6 +338,13 @@ export type {
   HistoryAggregatesQueryInput,
   CreateRuleInput,
   UpdateRuleInput,
+  // Rule V2 types
+  CreateRuleV2Input,
+  UpdateRuleV2Input,
+  // Bulk operations types
+  BulkUpdateRulesInput,
+  BulkDeleteRulesInput,
+  BulkMigrateRulesInput,
   ViolationQueryInput,
   ViolationSortField,
   ServerIdFilterInput,

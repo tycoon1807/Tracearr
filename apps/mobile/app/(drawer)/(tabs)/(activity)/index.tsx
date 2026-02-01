@@ -7,13 +7,14 @@
  * - Tablet (md+): 2-column grid, taller charts, increased padding
  */
 import { useState } from 'react';
-import { View, ScrollView, RefreshControl } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, ScrollView, RefreshControl, Platform } from 'react-native';
+import { Stack } from 'expo-router';
+import { DrawerActions, useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useMediaServer } from '@/providers/MediaServerProvider';
 import { useResponsive } from '@/hooks/useResponsive';
-import { colors, spacing } from '@/lib/theme';
+import { spacing, ACCENT_COLOR } from '@/lib/theme';
 import { Text } from '@/components/ui/text';
 import { Card } from '@/components/ui/card';
 import { PeriodSelector, type StatsPeriod } from '@/components/ui/period-selector';
@@ -38,6 +39,7 @@ function ChartSection({ title, children }: { title: string; children: React.Reac
 }
 
 export default function ActivityScreen() {
+  const navigation = useNavigation();
   const [period, setPeriod] = useState<StatsPeriod>('month');
   const { selectedServerId } = useMediaServer();
   const { isTablet, select } = useResponsive();
@@ -100,29 +102,26 @@ export default function ActivityScreen() {
   };
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: colors.background.dark }}
-      edges={['left', 'right', 'bottom']}
-    >
+    <>
       <ScrollView
-        className="flex-1"
+        style={{ flex: 1 }}
         contentContainerStyle={{
           paddingHorizontal: horizontalPadding,
           paddingTop: spacing.sm,
           paddingBottom: spacing.xl,
         }}
+        contentInsetAdjustmentBehavior="automatic"
         refreshControl={
           <RefreshControl
             refreshing={isRefetchingPlays}
             onRefresh={handleRefresh}
-            tintColor={colors.cyan.core}
+            tintColor={ACCENT_COLOR}
           />
         }
       >
         {/* Header with Period Selector */}
         <View className="mb-4 flex-row items-center justify-between">
           <View>
-            <Text className="text-lg font-semibold">Activity</Text>
             <Text className="text-muted-foreground text-sm">{periodLabels[period]}</Text>
           </View>
           <PeriodSelector value={period} onChange={setPeriod} />
@@ -190,6 +189,25 @@ export default function ActivityScreen() {
           </ChartSection>
         </View>
       </ScrollView>
-    </SafeAreaView>
+
+      {/* iOS Native Toolbar */}
+      {Platform.OS === 'ios' && (
+        <>
+          <Stack.Toolbar placement="left">
+            <Stack.Toolbar.Button
+              icon="line.3.horizontal"
+              onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
+            />
+          </Stack.Toolbar>
+          <Stack.Toolbar placement="right">
+            <Stack.Toolbar.Menu icon="ellipsis">
+              <Stack.Toolbar.MenuAction icon="arrow.clockwise" onPress={() => handleRefresh()}>
+                Refresh
+              </Stack.Toolbar.MenuAction>
+            </Stack.Toolbar.Menu>
+          </Stack.Toolbar>
+        </>
+      )}
+    </>
   );
 }

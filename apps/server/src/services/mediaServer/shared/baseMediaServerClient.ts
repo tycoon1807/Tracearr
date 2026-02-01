@@ -199,8 +199,56 @@ export abstract class BaseMediaServerClient
       ParentId: libraryId,
       Recursive: 'true',
       IncludeItemTypes: 'Movie,Series,Season,Episode,MusicArtist,MusicAlbum,Audio',
+      // IsMissing=false excludes "missing" episodes that Jellyfin knows about from metadata
+      // but the user doesn't have files for (fixes #240 - inflated episode counts)
+      IsMissing: 'false',
       Fields:
         'ProviderIds,Path,MediaSources,DateCreated,ProductionYear,SeriesName,SeriesId,ParentIndexNumber,IndexNumber,Album,AlbumArtist,Artists',
+      StartIndex: String(offset),
+      Limit: String(limit),
+    });
+
+    const data = await fetchJson<{ Items?: unknown[]; TotalRecordCount?: number }>(
+      `${this.baseUrl}/Items?${params}`,
+      {
+        headers: this.buildHeaders(),
+        service: this.serverType,
+        timeout: 30000,
+      }
+    );
+
+    const items = this.parsers.parseLibraryItemsResponse(data.Items ?? []);
+    const totalCount = data.TotalRecordCount ?? items.length;
+
+    return { items, totalCount };
+  }
+
+  /**
+   * Get all episodes (leaves) in a TV library with pagination
+   *
+   * For TV libraries, this fetches only Episode items, separate from Series/Season.
+   * This matches Plex behavior where episodes are fetched via /allLeaves endpoint.
+   *
+   * Fixes #263: Emby not reporting all TV episodes when using getLibraryItems alone.
+   *
+   * @param libraryId - The parent library ID
+   * @param options - Pagination options
+   * @returns Episodes and total count for pagination tracking
+   */
+  async getLibraryLeaves(
+    libraryId: string,
+    options?: { offset?: number; limit?: number }
+  ): Promise<{ items: MediaLibraryItem[]; totalCount: number }> {
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? 100;
+
+    const params = new URLSearchParams({
+      ParentId: libraryId,
+      Recursive: 'true',
+      IncludeItemTypes: 'Episode',
+      IsMissing: 'false',
+      Fields:
+        'ProviderIds,Path,MediaSources,DateCreated,ProductionYear,SeriesName,SeriesId,ParentIndexNumber,IndexNumber',
       StartIndex: String(offset),
       Limit: String(limit),
     });
@@ -238,6 +286,8 @@ export abstract class BaseMediaServerClient
     const params = new URLSearchParams({
       Recursive: 'true',
       IncludeItemTypes: 'Movie,Episode',
+      // IsMissing=false excludes "missing" items (fixes #240)
+      IsMissing: 'false',
       Filters: 'IsPlayed',
       SortBy: 'DatePlayed',
       SortOrder: 'Descending',

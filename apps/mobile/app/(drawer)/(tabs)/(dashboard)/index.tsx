@@ -7,9 +7,9 @@
  * - Tablet (md+): 2-column grid for Now Playing, larger map
  * - Large tablet (lg+): 3-column grid for Now Playing
  */
-import { View, ScrollView, RefreshControl } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { View, ScrollView, RefreshControl, Platform } from 'react-native';
+import { useRouter, Stack } from 'expo-router';
+import { DrawerActions, useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/lib/api';
@@ -21,7 +21,7 @@ import { NowPlayingCard } from '@/components/sessions';
 import { ServerResourceCard } from '@/components/server/ServerResourceCard';
 import { Text } from '@/components/ui/text';
 import { Card } from '@/components/ui/card';
-import { colors, spacing } from '@/lib/theme';
+import { colors, spacing, ACCENT_COLOR } from '@/lib/theme';
 
 /**
  * Compact stat pill for dashboard summary bar
@@ -60,6 +60,7 @@ function StatPill({
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { selectedServerId, selectedServer } = useMediaServer();
   const { isTablet, columns, select } = useResponsive();
 
@@ -75,7 +76,7 @@ export default function DashboardScreen() {
   const { data: activeSessions } = useQuery({
     queryKey: ['sessions', 'active', selectedServerId],
     queryFn: () => api.sessions.active(selectedServerId ?? undefined),
-    staleTime: 1000 * 15, // 15 seconds - match web
+    staleTime: 1000 * 5, // 5 seconds - real-time feel for active sessions
     refetchInterval: 1000 * 30, // 30 seconds - fallback if WebSocket events missed
   });
 
@@ -95,19 +96,13 @@ export default function DashboardScreen() {
   const nowPlayingColumns = columns.cards; // 1 on phone, 2 on tablet, 3 on large tablet
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: colors.background.dark }}
-      edges={['left', 'right', 'bottom']}
-    >
+    <>
       <ScrollView
-        className="flex-1"
+        style={{ flex: 1 }}
         contentContainerClassName="pb-8"
+        contentInsetAdjustmentBehavior="automatic"
         refreshControl={
-          <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={refetch}
-            tintColor={colors.cyan.core}
-          />
+          <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={ACCENT_COLOR} />
         }
       >
         {/* Today's Stats Bar */}
@@ -150,7 +145,7 @@ export default function DashboardScreen() {
         <View style={{ marginBottom: spacing.md, paddingHorizontal: horizontalPadding }}>
           <View className="mb-3 flex-row items-center justify-between">
             <View className="flex-row items-center gap-2">
-              <Ionicons name="tv-outline" size={18} color={colors.cyan.core} />
+              <Ionicons name="tv-outline" size={18} color={ACCENT_COLOR} />
               <Text className="text-muted-foreground text-sm font-semibold tracking-wide uppercase">
                 Now Playing
               </Text>
@@ -164,7 +159,7 @@ export default function DashboardScreen() {
                   borderRadius: 12,
                 }}
               >
-                <Text style={{ color: colors.cyan.core, fontSize: 12, fontWeight: '600' }}>
+                <Text style={{ color: ACCENT_COLOR, fontSize: 12, fontWeight: '600' }}>
                   {activeSessions.length} {activeSessions.length === 1 ? 'stream' : 'streams'}
                 </Text>
               </View>
@@ -219,7 +214,7 @@ export default function DashboardScreen() {
         {activeSessions && activeSessions.length > 0 && (
           <View style={{ marginBottom: spacing.md, paddingHorizontal: horizontalPadding }}>
             <View className="mb-3 flex-row items-center gap-2">
-              <Ionicons name="location-outline" size={18} color={colors.cyan.core} />
+              <Ionicons name="location-outline" size={18} color={ACCENT_COLOR} />
               <Text className="text-muted-foreground text-sm font-semibold tracking-wide uppercase">
                 Stream Locations
               </Text>
@@ -232,7 +227,7 @@ export default function DashboardScreen() {
         {isPlexServer && (
           <View style={{ paddingHorizontal: horizontalPadding }}>
             <View className="mb-3 flex-row items-center gap-2">
-              <Ionicons name="server-outline" size={18} color={colors.cyan.core} />
+              <Ionicons name="server-outline" size={18} color={ACCENT_COLOR} />
               <Text className="text-muted-foreground text-sm font-semibold tracking-wide uppercase">
                 Server Resources
               </Text>
@@ -245,6 +240,26 @@ export default function DashboardScreen() {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+
+      {/* iOS Native Toolbar */}
+      {Platform.OS === 'ios' && (
+        <>
+          <Stack.Toolbar placement="left">
+            <Stack.Toolbar.Button
+              icon="line.3.horizontal"
+              onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
+            />
+          </Stack.Toolbar>
+          <Stack.Toolbar placement="right">
+            <Stack.Toolbar.Button icon="bell" onPress={() => router.push('/alerts')} />
+            <Stack.Toolbar.Menu icon="ellipsis">
+              <Stack.Toolbar.MenuAction icon="arrow.clockwise" onPress={() => refetch()}>
+                Refresh
+              </Stack.Toolbar.MenuAction>
+            </Stack.Toolbar.Menu>
+          </Stack.Toolbar>
+        </>
+      )}
+    </>
   );
 }

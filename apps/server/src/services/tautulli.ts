@@ -7,7 +7,8 @@ import { z } from 'zod';
 import type { TautulliImportProgress, TautulliImportResult } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { settings, sessions, serverUsers, users } from '../db/schema.js';
-import { refreshAggregates } from '../db/timescale.js';
+import { refreshAggregates, checkAggregateNeedsRebuild } from '../db/timescale.js';
+import { enqueueMaintenanceJob } from '../jobs/maintenanceQueue.js';
 import { geoipService } from './geoip.js';
 import { geoasnService } from './geoasn.js';
 import type { PubSubService } from './cache.js';
@@ -23,7 +24,7 @@ import {
   type TimeBounds,
   createSimpleProgressPublisher,
 } from './import/index.js';
-import { normalizePlatformName } from '../utils/platformNormalizer.js';
+import { normalizeClient } from '../utils/platformNormalizer.js';
 import { normalizeStreamDecisions } from '../utils/transcodeNormalizer.js';
 
 const PAGE_SIZE = 5000; // Larger batches = fewer API calls (tested up to 10k, scales linearly)
@@ -612,6 +613,10 @@ export class TautulliService {
     // Track externalSessionIds we've already inserted in THIS import run
     const insertedThisRun = new Set<string>();
 
+    // Track date range of imported data for bounded aggregate refresh
+    let minImportDate: Date | null = null;
+    let maxImportDate: Date | null = null;
+
     // Track sessions that need referenceId linking (child → parent external IDs)
     // group_ids from Tautulli contains comma-separated session IDs in the same viewing chain
     // startedAt is stored to enable time-bounded queries in the linking phase
@@ -813,6 +818,11 @@ export class TautulliService {
 
           // Fallback dedup check by time-based key
           const startedAt = new Date(record.started * 1000);
+
+          // Track date range for bounded aggregate refresh
+          if (!minImportDate || startedAt < minImportDate) minImportDate = startedAt;
+          if (!maxImportDate || startedAt > maxImportDate) maxImportDate = startedAt;
+
           const ratingKeyStr =
             typeof record.rating_key === 'number' ? String(record.rating_key) : null;
 
@@ -958,7 +968,19 @@ export class TautulliService {
             playerName: record.player || record.product,
             deviceId: record.machine_id || null,
             product: record.product || null,
-            platform: normalizePlatformName(record.platform || ''),
+            // Use normalizeClient with product info to detect Android TV vs Android
+            // product contains context like "Plex for Android (TV)" that platform alone lacks
+            ...(() => {
+              const normalized = normalizeClient(
+                record.product || record.platform || '',
+                record.player ?? undefined,
+                'plex'
+              );
+              return {
+                platform: normalized.platform,
+                device: normalized.device,
+              };
+            })(),
             // Tautulli uses single transcode_decision for both video/audio
             ...(() => {
               const { videoDecision, audioDecision, isTranscode } = normalizeStreamDecisions(
@@ -1088,8 +1110,35 @@ export class TautulliService {
       progress.message = 'Refreshing aggregates...';
       publishProgress(progress);
       try {
-        // Full refresh needed after bulk import to recalculate all historical data
-        await refreshAggregates({ fullRefresh: true });
+        // Use bounded refresh based on actual import date range (memory-efficient)
+        // Add 1 day buffer on each side for timezone edge cases
+        if (minImportDate && maxImportDate) {
+          const startTime = new Date(minImportDate.getTime() - 24 * 60 * 60 * 1000);
+          const endTime = new Date(maxImportDate.getTime() + 24 * 60 * 60 * 1000);
+          console.log(
+            `[Import] Refreshing aggregates for date range: ${startTime.toISOString()} to ${endTime.toISOString()}`
+          );
+          await refreshAggregates({ startTime, endTime });
+        } else {
+          // Fallback to default 7-day bounded refresh if no dates tracked
+          await refreshAggregates();
+        }
+
+        // Check if this is a fresh install that needs full aggregate rebuild
+        // (aggregates missing >7 days of historical data)
+        const rebuildStatus = await checkAggregateNeedsRebuild();
+        if (rebuildStatus.needsRebuild) {
+          console.log(
+            `[Import] Fresh install detected - queueing safe aggregate rebuild: ${rebuildStatus.reason}`
+          );
+          try {
+            await enqueueMaintenanceJob('full_aggregate_rebuild', 'system');
+            console.log('[Import] Safe aggregate rebuild job queued');
+          } catch {
+            // Job might already be running/queued - that's fine
+            console.log('[Import] Could not queue aggregate rebuild (may already be running)');
+          }
+        }
       } catch (err) {
         console.warn('Failed to refresh aggregates after import:', err);
       }
@@ -1368,12 +1417,13 @@ export class TautulliService {
     }
 
     // Refresh aggregates so updated bitrate data appears in bandwidth stats
+    // Enrichment only updates existing sessions, doesn't add new dates, so default bounded refresh is fine
     if (totalEnriched > 0) {
       progress.message = 'Refreshing aggregates...';
       publishProgress(progress);
       try {
-        // Full refresh needed after enrichment to recalculate bandwidth aggregates
-        await refreshAggregates({ fullRefresh: true });
+        // Default 7-day bounded refresh is sufficient for enrichment updates
+        await refreshAggregates();
       } catch (err) {
         console.warn('[Tautulli] Failed to refresh aggregates after enrichment:', err);
       }

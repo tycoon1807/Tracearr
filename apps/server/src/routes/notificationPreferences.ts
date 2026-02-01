@@ -13,6 +13,7 @@ import type { NotificationPreferences, NotificationPreferencesWithStatus } from 
 import { db } from '../db/client.js';
 import { mobileSessions, notificationPreferences } from '../db/schema.js';
 import { getPushRateLimiter } from '../services/pushRateLimiter.js';
+import { pushNotificationService } from '../services/pushNotification.js';
 
 // Update preferences schema
 const updatePreferencesSchema = z.object({
@@ -297,6 +298,61 @@ export const notificationPreferencesRoutes: FastifyPluginAsync = async (app) => 
     );
 
     return toApiResponse(row);
+  });
+
+  /**
+   * POST /notifications/test - Send a test notification to current device
+   *
+   * Requires mobile authentication. Sends a test push notification to verify
+   * that push notifications are working for this device.
+   */
+  app.post('/test', { preHandler: [app.requireMobile] }, async (request, reply) => {
+    const authUser = request.user;
+
+    // Find mobile session using deviceId (preferred) or fallback to user lookup
+    const mobileSession = authUser.deviceId
+      ? await findMobileSessionByDeviceId(authUser.deviceId)
+      : await findMobileSessionForUserFallback(authUser.userId);
+
+    if (!mobileSession) {
+      return reply.notFound('No mobile session found. Please pair the device first.');
+    }
+
+    // Get push token from session
+    const session = await db
+      .select({ expoPushToken: mobileSessions.expoPushToken })
+      .from(mobileSessions)
+      .where(eq(mobileSessions.id, mobileSession.id))
+      .limit(1);
+
+    const pushToken = session[0]?.expoPushToken;
+    if (!pushToken) {
+      return {
+        success: false,
+        message: 'No push token registered. Enable notifications in your device settings first.',
+      };
+    }
+
+    // Send test notification
+    const result = await pushNotificationService.sendTestNotification(pushToken);
+
+    if (!result.success) {
+      app.log.warn(
+        { mobileSessionId: mobileSession.id, error: result.error },
+        'Test notification failed'
+      );
+      return {
+        success: false,
+        message: result.error ?? 'Failed to send test notification',
+      };
+    }
+
+    app.log.info({ mobileSessionId: mobileSession.id }, 'Test notification sent');
+
+    return {
+      success: true,
+      message: 'Test notification sent',
+    };
   });
 };
 

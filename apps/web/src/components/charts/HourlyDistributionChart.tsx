@@ -94,7 +94,9 @@ export function HourlyDistributionChart({
           color: 'hsl(var(--popover-foreground))',
         },
         formatter: function () {
-          return `<b>${this.x}</b><br/>Watches: ${this.y}`;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const label = (this as any).point?.category || this.x;
+          return `<b>${label}</b><br/>Watches: ${this.y}`;
         },
       },
       series: [

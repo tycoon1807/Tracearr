@@ -26,7 +26,8 @@ import type {
 import { jellystatBackupSchema } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { servers, sessions } from '../db/schema.js';
-import { refreshAggregates } from '../db/timescale.js';
+import { refreshAggregates, checkAggregateNeedsRebuild } from '../db/timescale.js';
+import { enqueueMaintenanceJob } from '../jobs/maintenanceQueue.js';
 import { geoipService } from './geoip.js';
 import { geoasnService } from './geoasn.js';
 import type { PubSubService } from './cache.js';
@@ -669,6 +670,10 @@ export async function importJellystatBackup(
     const insertedInThisImport = new Set<string>();
     const updateStreamDetails = options?.updateStreamDetails ?? false;
 
+    // Track date range of imported data for bounded aggregate refresh
+    let minImportDate: Date | null = null;
+    let maxImportDate: Date | null = null;
+
     let imported = 0;
     let updated = 0;
     let skipped = 0;
@@ -789,6 +794,14 @@ export async function importJellystatBackup(
           );
           insertBatch.push(sessionData);
 
+          // Track date range for bounded aggregate refresh
+          if (sessionData.startedAt) {
+            if (!minImportDate || sessionData.startedAt < minImportDate)
+              minImportDate = sessionData.startedAt;
+            if (!maxImportDate || sessionData.startedAt > maxImportDate)
+              maxImportDate = sessionData.startedAt;
+          }
+
           insertedInThisImport.add(activity.Id);
 
           imported++;
@@ -829,8 +842,35 @@ export async function importJellystatBackup(
     progress.message = 'Refreshing aggregates...';
     publishProgress(progress);
     try {
-      // Full refresh needed after bulk import to recalculate all historical data
-      await refreshAggregates({ fullRefresh: true });
+      // Use bounded refresh based on actual import date range (memory-efficient)
+      // Add 1 day buffer on each side for timezone edge cases
+      if (minImportDate && maxImportDate) {
+        const startTime = new Date(minImportDate.getTime() - 24 * 60 * 60 * 1000);
+        const endTime = new Date(maxImportDate.getTime() + 24 * 60 * 60 * 1000);
+        console.log(
+          `[Jellystat] Refreshing aggregates for date range: ${startTime.toISOString()} to ${endTime.toISOString()}`
+        );
+        await refreshAggregates({ startTime, endTime });
+      } else {
+        // Fallback to default 7-day bounded refresh if no dates tracked
+        await refreshAggregates();
+      }
+
+      // Check if this is a fresh install that needs full aggregate rebuild
+      // (aggregates missing >7 days of historical data)
+      const rebuildStatus = await checkAggregateNeedsRebuild();
+      if (rebuildStatus.needsRebuild) {
+        console.log(
+          `[Jellystat] Fresh install detected - queueing safe aggregate rebuild: ${rebuildStatus.reason}`
+        );
+        try {
+          await enqueueMaintenanceJob('full_aggregate_rebuild', 'system');
+          console.log('[Jellystat] Safe aggregate rebuild job queued');
+        } catch {
+          // Job might already be running/queued - that's fine
+          console.log('[Jellystat] Could not queue aggregate rebuild (may already be running)');
+        }
+      }
     } catch (err) {
       console.warn('[Jellystat] Failed to refresh aggregates after import:', err);
     }

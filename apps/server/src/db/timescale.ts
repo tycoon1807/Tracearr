@@ -19,8 +19,11 @@ import { PRIMARY_MEDIA_TYPES_SQL_LITERAL } from '../constants/mediaTypes.js';
  * - 2: Added media_type IN ('movie', 'episode') filter to all aggregates
  * - 3: Added daily_bandwidth_by_user aggregate for bandwidth analytics
  * - 4: Added library_stats_daily and content_quality_daily aggregates for library statistics
+ * - 5: Added music_count to library_stats_daily for /growth route optimization
+ * - 6: Removed unused aggregates (daily_plays_by_user, daily_plays_by_server,
+ *      daily_stats_summary, hourly_concurrent_streams) - no routes query them
  */
-const AGGREGATE_SCHEMA_VERSION = 4;
+const AGGREGATE_SCHEMA_VERSION = 6;
 
 /** Config for a continuous aggregate view */
 interface AggregateDefinition {
@@ -34,152 +37,21 @@ interface AggregateDefinition {
   };
 }
 
-/** All continuous aggregate definitions with media type filtering */
+/**
+ * All continuous aggregate definitions.
+ *
+ * Note: Removed unused aggregates in v6:
+ * - daily_plays_by_user (no route queries it - routes use raw sessions)
+ * - daily_plays_by_server (no route queries it - routes use raw sessions)
+ * - daily_stats_summary (no route queries it - dashboard uses prepared statements)
+ * - hourly_concurrent_streams (no route queries it - /stats/concurrent queries raw)
+ */
 function getAggregateDefinitions(): AggregateDefinition[] {
   const mediaFilter = PRIMARY_MEDIA_TYPES_SQL_LITERAL;
 
   return [
     {
-      name: 'daily_plays_by_user',
-      toolkitSql: `
-        CREATE MATERIALIZED VIEW IF NOT EXISTS daily_plays_by_user
-        WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
-        SELECT
-          time_bucket('1 day', started_at) AS day,
-          server_user_id,
-          hyperloglog(32768, COALESCE(reference_id, id)) AS plays_hll,
-          SUM(COALESCE(duration_ms, 0)) AS total_duration_ms
-        FROM sessions
-        WHERE ${mediaFilter}
-        GROUP BY day, server_user_id
-        WITH NO DATA
-      `,
-      fallbackSql: `
-        CREATE MATERIALIZED VIEW IF NOT EXISTS daily_plays_by_user
-        WITH (timescaledb.continuous) AS
-        SELECT
-          time_bucket('1 day', started_at) AS day,
-          server_user_id,
-          COUNT(*) AS play_count,
-          SUM(COALESCE(duration_ms, 0)) AS total_duration_ms
-        FROM sessions
-        WHERE ${mediaFilter}
-        GROUP BY day, server_user_id
-        WITH NO DATA
-      `,
-      refreshPolicy: {
-        startOffset: '3 days',
-        endOffset: '1 hour',
-        scheduleInterval: '5 minutes',
-      },
-    },
-    {
-      name: 'daily_plays_by_server',
-      toolkitSql: `
-        CREATE MATERIALIZED VIEW IF NOT EXISTS daily_plays_by_server
-        WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
-        SELECT
-          time_bucket('1 day', started_at) AS day,
-          server_id,
-          hyperloglog(32768, COALESCE(reference_id, id)) AS plays_hll,
-          SUM(COALESCE(duration_ms, 0)) AS total_duration_ms
-        FROM sessions
-        WHERE ${mediaFilter}
-        GROUP BY day, server_id
-        WITH NO DATA
-      `,
-      fallbackSql: `
-        CREATE MATERIALIZED VIEW IF NOT EXISTS daily_plays_by_server
-        WITH (timescaledb.continuous) AS
-        SELECT
-          time_bucket('1 day', started_at) AS day,
-          server_id,
-          COUNT(*) AS play_count,
-          SUM(COALESCE(duration_ms, 0)) AS total_duration_ms
-        FROM sessions
-        WHERE ${mediaFilter}
-        GROUP BY day, server_id
-        WITH NO DATA
-      `,
-      refreshPolicy: {
-        startOffset: '3 days',
-        endOffset: '1 hour',
-        scheduleInterval: '5 minutes',
-      },
-    },
-    {
-      name: 'daily_stats_summary',
-      toolkitSql: `
-        CREATE MATERIALIZED VIEW IF NOT EXISTS daily_stats_summary
-        WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
-        SELECT
-          time_bucket('1 day', started_at) AS day,
-          hyperloglog(32768, COALESCE(reference_id, id)) AS plays_hll,
-          hyperloglog(32768, server_user_id) AS users_hll,
-          hyperloglog(32768, server_id) AS servers_hll,
-          SUM(COALESCE(duration_ms, 0)) AS total_duration_ms,
-          AVG(COALESCE(duration_ms, 0))::bigint AS avg_duration_ms
-        FROM sessions
-        WHERE ${mediaFilter}
-        GROUP BY day
-        WITH NO DATA
-      `,
-      fallbackSql: `
-        CREATE MATERIALIZED VIEW IF NOT EXISTS daily_stats_summary
-        WITH (timescaledb.continuous) AS
-        SELECT
-          time_bucket('1 day', started_at) AS day,
-          COUNT(DISTINCT COALESCE(reference_id, id)) AS play_count,
-          COUNT(DISTINCT server_user_id) AS user_count,
-          COUNT(DISTINCT server_id) AS server_count,
-          SUM(COALESCE(duration_ms, 0)) AS total_duration_ms,
-          AVG(COALESCE(duration_ms, 0))::bigint AS avg_duration_ms
-        FROM sessions
-        WHERE ${mediaFilter}
-        GROUP BY day
-        WITH NO DATA
-      `,
-      refreshPolicy: {
-        startOffset: '3 days',
-        endOffset: '1 hour',
-        scheduleInterval: '5 minutes',
-      },
-    },
-    {
-      name: 'hourly_concurrent_streams',
-      toolkitSql: `
-        CREATE MATERIALIZED VIEW IF NOT EXISTS hourly_concurrent_streams
-        WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
-        SELECT
-          time_bucket('1 hour', started_at) AS hour,
-          server_id,
-          COUNT(*) AS stream_count
-        FROM sessions
-        WHERE state IN ('playing', 'paused')
-          AND ${mediaFilter}
-        GROUP BY hour, server_id
-        WITH NO DATA
-      `,
-      fallbackSql: `
-        CREATE MATERIALIZED VIEW IF NOT EXISTS hourly_concurrent_streams
-        WITH (timescaledb.continuous) AS
-        SELECT
-          time_bucket('1 hour', started_at) AS hour,
-          server_id,
-          COUNT(*) AS stream_count
-        FROM sessions
-        WHERE state IN ('playing', 'paused')
-          AND ${mediaFilter}
-        GROUP BY hour, server_id
-        WITH NO DATA
-      `,
-      refreshPolicy: {
-        startOffset: '1 day',
-        endOffset: '1 hour',
-        scheduleInterval: '5 minutes',
-      },
-    },
-    {
+      // Used by: /stats/engagement, /library/completion, /library/patterns
       name: 'daily_content_engagement',
       toolkitSql: `
         CREATE MATERIALIZED VIEW IF NOT EXISTS daily_content_engagement
@@ -242,6 +114,7 @@ function getAggregateDefinitions(): AggregateDefinition[] {
       },
     },
     {
+      // Used by: /bandwidth/*
       name: 'daily_bandwidth_by_user',
       toolkitSql: `
         CREATE MATERIALIZED VIEW IF NOT EXISTS daily_bandwidth_by_user
@@ -289,6 +162,7 @@ function getAggregateDefinitions(): AggregateDefinition[] {
     },
     // Library Statistics Aggregates (from library_snapshots hypertable)
     {
+      // Used by: /library/growth, /library/quality, /library/storage
       name: 'library_stats_daily',
       // Use MAX() not SUM() - multiple snapshots per day represent the same library state
       // If a library has 1000 items and 3 snapshots exist, SUM would incorrectly produce 3000
@@ -304,6 +178,7 @@ function getAggregateDefinitions(): AggregateDefinition[] {
           MAX(movie_count) AS movie_count,
           MAX(episode_count) AS episode_count,
           MAX(show_count) AS show_count,
+          MAX(music_count) AS music_count,
           MAX(count_4k) AS count_4k,
           MAX(count_1080p) AS count_1080p,
           MAX(count_720p) AS count_720p,
@@ -324,6 +199,7 @@ function getAggregateDefinitions(): AggregateDefinition[] {
           MAX(movie_count) AS movie_count,
           MAX(episode_count) AS episode_count,
           MAX(show_count) AS show_count,
+          MAX(music_count) AS music_count,
           MAX(count_4k) AS count_4k,
           MAX(count_1080p) AS count_1080p,
           MAX(count_720p) AS count_720p,
@@ -339,6 +215,7 @@ function getAggregateDefinitions(): AggregateDefinition[] {
       },
     },
     {
+      // Used by: internal/future - tracks quality distribution evolution over time
       name: 'content_quality_daily',
       // Server-level quality and codec metrics for tracking quality evolution over time
       // Use MAX() not SUM() - multiple intra-day snapshots represent the same server state
@@ -431,7 +308,12 @@ async function createAggregate(
   }
 
   const sqlStatement = hasToolkit ? def.toolkitSql : def.fallbackSql;
-  await db.execute(sql.raw(sqlStatement));
+  try {
+    await db.execute(sql.raw(sqlStatement));
+  } catch (error) {
+    console.error(`[TimescaleDB] Failed to create aggregate ${def.name}:`, error);
+    throw error; // Re-throw to allow caller to handle
+  }
 }
 
 /**
@@ -597,6 +479,79 @@ async function isCompressionEnabled(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Check if compression orderby settings are correct
+ * Returns true if orderby is explicitly set (not auto-detected)
+
+ */
+async function isCompressionOrderbyCorrect(): Promise<boolean> {
+  try {
+    const result = await db.execute(sql`
+      SELECT attname, orderby_column_index
+      FROM timescaledb_information.compression_settings
+      WHERE hypertable_name = 'sessions'
+        AND orderby_column_index IS NOT NULL
+      ORDER BY orderby_column_index
+    `);
+
+    // If no rows have orderby set, TimescaleDB will auto-detect (causes 32-column error)
+    if (result.rows.length === 0) {
+      return false;
+    }
+
+    // Check that started_at is the first orderby column
+    const firstOrderby = (result.rows[0] as { attname: string })?.attname;
+    return firstOrderby === 'started_at';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Update compression settings to fix orderby column limit issue
+ * This is safe to run even if compression is already enabled
+ */
+async function fixCompressionSettings(): Promise<void> {
+  console.log('[TimescaleDB] Fixing compression settings (orderby column limit issue)...');
+
+  // Check for existing compressed chunks that may have old settings
+  const compressedResult = await db.execute(sql`
+    SELECT COUNT(*)::int as count
+    FROM timescaledb_information.chunks
+    WHERE hypertable_name = 'sessions' AND is_compressed = true
+  `);
+  const compressedCount = (compressedResult.rows[0] as { count: number })?.count ?? 0;
+
+  if (compressedCount > 0) {
+    console.warn(
+      `[TimescaleDB] Warning: ${compressedCount} compressed chunks exist with old settings. ` +
+        'New chunks will use correct settings. If you see compression errors for old chunks, ' +
+        "run: SELECT decompress_chunk(c) FROM show_chunks('sessions') c WHERE is_compressed;"
+    );
+  }
+
+  // Remove existing policy first
+  await db.execute(sql`
+    SELECT remove_compression_policy('sessions', if_exists => true)
+  `);
+
+  // Update compression settings with explicit orderby
+  await db.execute(sql`
+    ALTER TABLE sessions SET (
+      timescaledb.compress,
+      timescaledb.compress_segmentby = 'server_user_id, server_id',
+      timescaledb.compress_orderby = 'started_at DESC, id'
+    )
+  `);
+
+  // Re-add compression policy
+  await db.execute(sql`
+    SELECT add_compression_policy('sessions', INTERVAL '7 days', if_not_exists => true)
+  `);
+
+  console.log('[TimescaleDB] Compression settings fixed successfully');
 }
 
 /**
@@ -923,10 +878,13 @@ async function setupRefreshPolicies(): Promise<void> {
  */
 async function enableCompression(): Promise<void> {
   // Enable compression settings
+  // Note: compress_orderby is explicitly set to avoid TimescaleDB auto-detecting
+  // too many columns (>32), which fails with "cannot use more than 32 columns in an index"
   await db.execute(sql`
     ALTER TABLE sessions SET (
       timescaledb.compress,
-      timescaledb.compress_segmentby = 'server_user_id, server_id'
+      timescaledb.compress_segmentby = 'server_user_id, server_id',
+      timescaledb.compress_orderby = 'started_at DESC, id'
     )
   `);
 
@@ -988,14 +946,278 @@ export async function refreshAggregates(options?: RefreshAggregatesOptions): Pro
         );
       } else {
         // Time-bounded refresh - only scans relevant chunks (default)
+        // Must use explicit timestamptz cast - CALL statements don't infer parameter types
+        const startStr = startTime.toISOString();
+        const endStr = endTime.toISOString();
         await db.execute(
-          sql`CALL refresh_continuous_aggregate(${aggregate}::regclass, ${startTime}, ${endTime})`
+          sql`CALL refresh_continuous_aggregate(${aggregate}::regclass, ${startStr}::timestamptz, ${endStr}::timestamptz)`
         );
       }
     } catch (err) {
       // Log but don't fail - aggregate might not have data yet
       console.warn(`Failed to refresh aggregate ${aggregate}:`, err);
     }
+  }
+}
+
+/**
+ * Options for safe batched aggregate refresh
+ */
+export interface SafeRefreshOptions {
+  /** Days per batch (default: 30) */
+  batchDays?: number;
+  /** Milliseconds delay between batches (default: 2000) */
+  delayBetweenBatches?: number;
+  /** Progress callback */
+  onProgress?: (progress: AggregateRefreshProgress) => void;
+  /** AbortSignal for cancellation */
+  signal?: AbortSignal;
+}
+
+/**
+ * Progress information for aggregate refresh
+ */
+export interface AggregateRefreshProgress {
+  aggregate: string;
+  totalAggregates: number;
+  currentAggregateIndex: number;
+  startDate: string;
+  endDate: string;
+  currentBatchStart: string;
+  currentBatchEnd: string;
+  percentComplete: number;
+  status: 'running' | 'paused' | 'completed' | 'error';
+}
+
+/**
+ * Get the date range of actual data in the database
+ * Clamps earliest date to MIN_VALID_YEAR to avoid processing bogus historical data
+ * (e.g., Emby sometimes returns dates like year 0001 for items with missing metadata)
+ */
+const MIN_VALID_YEAR = 2015;
+
+async function getDataDateRange(): Promise<{ earliest: Date | null; latest: Date | null }> {
+  const result = await db.execute(sql`
+    SELECT
+      LEAST(
+        (SELECT MIN(started_at) FROM sessions),
+        (SELECT MIN(created_at) FROM library_items WHERE file_size > 0)
+      ) AS earliest,
+      GREATEST(
+        (SELECT MAX(started_at) FROM sessions),
+        NOW()
+      ) AS latest
+  `);
+
+  const row = result.rows[0] as { earliest: string | null; latest: string | null };
+
+  let earliest: Date | null = row.earliest ? new Date(row.earliest) : null;
+  const latest: Date | null = row.latest ? new Date(row.latest) : null;
+
+  // Clamp earliest date to MIN_VALID_YEAR to avoid processing bogus data
+  // Bad dates (year 0001, 1970, etc.) would cause massive unnecessary batch processing
+  if (earliest && earliest.getFullYear() < MIN_VALID_YEAR) {
+    console.warn(
+      `[TimescaleDB] Earliest date ${earliest.toISOString()} is before ${MIN_VALID_YEAR}, clamping to Jan 1 ${MIN_VALID_YEAR}`
+    );
+    earliest = new Date(Date.UTC(MIN_VALID_YEAR, 0, 1));
+  }
+
+  return { earliest, latest };
+}
+
+/**
+ * Get list of active aggregate names (those we actually manage).
+ * Exported for use in debug routes and other places that need the list.
+ */
+export function getActiveAggregateNames(): string[] {
+  return getAggregateDefinitions().map((def) => def.name);
+}
+
+/**
+ * Safely refresh a single aggregate using batched processing.
+ * This prevents memory exhaustion by processing in small time windows.
+ *
+ * @param aggregateName - Name of the aggregate to refresh
+ * @param startDate - Start of date range
+ * @param endDate - End of date range
+ * @param options - Refresh options
+ */
+export async function safeFullRefreshAggregate(
+  aggregateName: string,
+  startDate: Date,
+  endDate: Date,
+  options: SafeRefreshOptions = {}
+): Promise<void> {
+  const { batchDays = 30, delayBetweenBatches = 2000, onProgress, signal } = options;
+
+  const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+  // Ensure at least 1 batch to prevent division by zero in progress calculation
+  const totalBatches = Math.max(1, Math.ceil(totalDays / batchDays));
+
+  let currentBatch = 0;
+  let batchStart = new Date(startDate);
+
+  console.log(
+    `[TimescaleDB] Safe refresh ${aggregateName}: ${totalDays} days in ${totalBatches} batches`
+  );
+
+  while (batchStart < endDate) {
+    // Check for cancellation
+    if (signal?.aborted) {
+      throw new Error('Refresh cancelled');
+    }
+
+    const batchEnd = new Date(
+      Math.min(batchStart.getTime() + batchDays * 24 * 60 * 60 * 1000, endDate.getTime())
+    );
+
+    // Refresh this batch
+    try {
+      // Must use explicit timestamptz cast - CALL statements don't infer parameter types
+      const startStr = batchStart.toISOString();
+      const endStr = batchEnd.toISOString();
+      await db.execute(
+        sql`CALL refresh_continuous_aggregate(${aggregateName}::regclass, ${startStr}::timestamptz, ${endStr}::timestamptz)`
+      );
+    } catch (err) {
+      console.warn(`[TimescaleDB] Batch refresh failed for ${aggregateName}:`, err);
+      // Continue to next batch rather than failing entirely
+    }
+
+    currentBatch++;
+
+    // Report progress
+    onProgress?.({
+      aggregate: aggregateName,
+      totalAggregates: 1,
+      currentAggregateIndex: 0,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      currentBatchStart: batchStart.toISOString(),
+      currentBatchEnd: batchEnd.toISOString(),
+      percentComplete: Math.round((currentBatch / totalBatches) * 100),
+      status: 'running',
+    });
+
+    // Move to next batch
+    batchStart = batchEnd;
+
+    // Delay between batches to let system breathe
+    if (batchStart < endDate && delayBetweenBatches > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayBetweenBatches));
+    }
+  }
+}
+
+/**
+ * Safely refresh ALL aggregates using batched processing.
+ * This is the safe alternative to fullRefresh: true for full history rebuilds.
+ *
+ * Features:
+ * - Processes one aggregate at a time
+ * - Each aggregate is processed in 30-day batches
+ * - 2-second delay between batches prevents lock exhaustion
+ * - Progress tracking via callback
+ * - Cancellable via AbortSignal
+ *
+ * @param options - Refresh options
+ */
+export async function safeFullRefreshAllAggregates(
+  options: SafeRefreshOptions = {}
+): Promise<void> {
+  const { onProgress, signal } = options;
+
+  // Get date range from actual data
+  const dateRange = await getDataDateRange();
+  if (!dateRange.earliest || !dateRange.latest) {
+    console.log('[TimescaleDB] No data to refresh');
+    return;
+  }
+
+  const aggregates = getActiveAggregateNames();
+  console.log(
+    `[TimescaleDB] Safe full refresh: ${aggregates.length} aggregates from ${dateRange.earliest.toISOString()} to ${dateRange.latest.toISOString()}`
+  );
+
+  for (let i = 0; i < aggregates.length; i++) {
+    if (signal?.aborted) {
+      throw new Error('Refresh cancelled');
+    }
+
+    const aggregate = aggregates[i];
+    if (!aggregate) continue;
+
+    console.log(`[TimescaleDB] Safe refresh ${i + 1}/${aggregates.length}: ${aggregate}`);
+
+    await safeFullRefreshAggregate(aggregate, dateRange.earliest, dateRange.latest, {
+      ...options,
+      onProgress: (progress) => {
+        onProgress?.({
+          ...progress,
+          totalAggregates: aggregates.length,
+          currentAggregateIndex: i,
+          percentComplete: Math.round(
+            ((i + progress.percentComplete / 100) / aggregates.length) * 100
+          ),
+        });
+      },
+    });
+  }
+
+  console.log('[TimescaleDB] Safe full refresh complete');
+}
+
+/**
+ * Check if aggregates need a full rebuild (for fresh installs after import)
+ * Returns true if aggregates are missing significant historical data
+ */
+export async function checkAggregateNeedsRebuild(): Promise<{
+  needsRebuild: boolean;
+  reason?: string;
+}> {
+  try {
+    const result = await db.execute(sql`
+      SELECT
+        (SELECT MIN(started_at) FROM sessions) AS earliest_session,
+        (SELECT MIN(day) FROM daily_content_engagement) AS earliest_aggregate,
+        (SELECT COUNT(*) FROM sessions) AS session_count
+    `);
+
+    const row = result.rows[0] as {
+      earliest_session: string | null;
+      earliest_aggregate: string | null;
+      session_count: string;
+    };
+
+    const sessionCount = parseInt(row.session_count, 10);
+
+    // No sessions = nothing to rebuild
+    if (sessionCount === 0 || !row.earliest_session) {
+      return { needsRebuild: false };
+    }
+
+    // No aggregate data yet = definitely needs rebuild
+    if (!row.earliest_aggregate) {
+      return { needsRebuild: true, reason: 'No aggregate data exists' };
+    }
+
+    const sessionDate = new Date(row.earliest_session);
+    const aggregateDate = new Date(row.earliest_aggregate);
+    const daysDiff = (aggregateDate.getTime() - sessionDate.getTime()) / (24 * 60 * 60 * 1000);
+
+    // If aggregates are missing more than 7 days of history, trigger rebuild
+    if (daysDiff > 7) {
+      return {
+        needsRebuild: true,
+        reason: `Aggregates missing ${Math.round(daysDiff)} days of historical data`,
+      };
+    }
+
+    return { needsRebuild: false };
+  } catch (err) {
+    console.warn('[TimescaleDB] Error checking aggregate status:', err);
+    return { needsRebuild: false };
   }
 }
 
@@ -1084,16 +1306,40 @@ export async function initTimescaleDB(): Promise<{
 
   // Check and create continuous aggregates
   const existingAggregates = await getContinuousAggregates();
+
+  // IMPORTANT: Only include aggregates that are actively used
+  // Old aggregates that are no longer needed are handled separately below
   const expectedAggregates = [
-    'daily_plays_by_user',
-    'daily_plays_by_server',
-    'daily_stats_summary',
-    'hourly_concurrent_streams',
     'daily_content_engagement', // Engagement tracking system
     'daily_bandwidth_by_user', // Bandwidth analytics
     'library_stats_daily', // Library statistics aggregate
     'content_quality_daily', // Quality/codec evolution tracking
   ];
+
+  // Remove deprecated aggregates if they still exist (cleanup from v1.4.x)
+  // These caused FD exhaustion and lock contention with large histories
+  const deprecatedAggregates = [
+    'daily_plays_by_user',
+    'daily_plays_by_server',
+    'daily_stats_summary',
+    'hourly_concurrent_streams',
+  ];
+
+  for (const deprecated of deprecatedAggregates) {
+    if (existingAggregates.includes(deprecated)) {
+      try {
+        // Remove refresh policy first (prevents "policy not found" errors)
+        await db.execute(
+          sql.raw(`SELECT remove_continuous_aggregate_policy('${deprecated}', if_exists => true)`)
+        );
+        // Drop the aggregate itself
+        await db.execute(sql.raw(`DROP MATERIALIZED VIEW IF EXISTS ${deprecated} CASCADE`));
+        actions.push(`Removed deprecated aggregate: ${deprecated}`);
+      } catch (dropErr) {
+        console.warn(`[TimescaleDB] Failed to drop deprecated aggregate ${deprecated}:`, dropErr);
+      }
+    }
+  }
 
   const missingAggregates = expectedAggregates.filter((agg) => !existingAggregates.includes(agg));
 
@@ -1147,7 +1393,14 @@ export async function initTimescaleDB(): Promise<{
     await enableCompression();
     actions.push('Enabled compression on sessions');
   } else {
-    actions.push('Compression already enabled');
+    // Check if compression settings need to be fixed (orderby column limit issue)
+    const orderbyCorrect = await isCompressionOrderbyCorrect();
+    if (!orderbyCorrect) {
+      await fixCompressionSettings();
+      actions.push('Fixed compression settings (orderby column limit)');
+    } else {
+      actions.push('Compression already enabled with correct settings');
+    }
   }
 
   // Create partial indexes for optimized filtered queries
@@ -1213,10 +1466,14 @@ const ENGAGEMENT_VIEWS = [
  */
 async function engagementViewsExist(): Promise<boolean> {
   try {
+    const viewNames = sql.join(
+      ENGAGEMENT_VIEWS.map((v) => sql`${v}`),
+      sql`, `
+    );
     const result = await db.execute(sql`
       SELECT COUNT(*)::int as count FROM information_schema.views
       WHERE table_schema = 'public'
-        AND table_name = ANY(${ENGAGEMENT_VIEWS})
+        AND table_name IN (${viewNames})
     `);
     return (result.rows[0] as { count: number })?.count === ENGAGEMENT_VIEWS.length;
   } catch {
@@ -1670,11 +1927,20 @@ async function enableLibrarySnapshotsCompression(): Promise<void> {
 /**
  * Add retention policy to library_snapshots hypertable
  *
- * Drops chunks older than 1 year automatically.
+ * Drops chunks older than 90 days automatically. Aggregates (library_stats_daily)
+ * preserve summarized history indefinitely, so raw data only needs short retention.
+ * Matches manual cleanup_old_chunks job retention period.
  */
 async function addLibrarySnapshotsRetention(): Promise<void> {
+  // Remove any existing policy first to ensure we update to 90 days
+  // (add_retention_policy with if_not_exists won't change existing policies)
+  try {
+    await db.execute(sql`SELECT remove_retention_policy('library_snapshots', if_exists => true)`);
+  } catch {
+    // Ignore errors - policy may not exist
+  }
   await db.execute(sql`
-    SELECT add_retention_policy('library_snapshots', INTERVAL '1 year', if_not_exists => true)
+    SELECT add_retention_policy('library_snapshots', INTERVAL '90 days', if_not_exists => true)
   `);
 }
 
@@ -1700,7 +1966,7 @@ async function isLibrarySnapshotsCompressionEnabled(): Promise<boolean> {
  * This function is idempotent and safe to run multiple times:
  * - Converts table to hypertable with 1-day chunks
  * - Enables compression after 3-day window (allows enrichment to complete)
- * - Adds 1-year retention policy
+ * - Adds 90-day retention policy
  *
  * Called from initTimescaleDB() on server startup.
  */
@@ -1754,7 +2020,7 @@ export async function initLibrarySnapshotsHypertable(): Promise<{
 
   // Add retention policy (idempotent via if_not_exists)
   await addLibrarySnapshotsRetention();
-  actions.push('Ensured 1-year retention policy on library_snapshots');
+  actions.push('Ensured 90-day retention policy on library_snapshots');
 
   // Check and create library continuous aggregates
   const existingLibraryAggregates = await getLibrarySnapshotAggregates();

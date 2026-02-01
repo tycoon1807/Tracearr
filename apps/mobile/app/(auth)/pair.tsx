@@ -1,11 +1,10 @@
 /**
  * Pairing screen - QR code scanner or manual entry
- * Supports both initial pairing and adding additional servers
+ * Single-server model - one Tracearr server per mobile app
  */
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
-  Text,
   TextInput,
   Pressable,
   StyleSheet,
@@ -16,10 +15,13 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { ChevronLeft } from 'lucide-react-native';
-import { useAuthStore } from '@/lib/authStore';
-import { colors, spacing, borderRadius, typography } from '@/lib/theme';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useAuthStateStore } from '@/lib/authStateStore';
+import { validateServerUrl, isInternalUrl, showInternalUrlWarning } from '@/lib/validation';
+import { ROUTES } from '@/lib/routes';
+import { Text } from '@/components/ui/text';
+import { colors } from '@/lib/theme';
+import { cn } from '@/lib/utils';
 
 interface QRPairingPayload {
   url: string;
@@ -28,29 +30,57 @@ interface QRPairingPayload {
 
 export default function PairScreen() {
   const router = useRouter();
+  const { prefillUrl } = useLocalSearchParams<{ prefillUrl?: string }>();
   const [permission, requestPermission] = useCameraPermissions();
-  const [manualMode, setManualMode] = useState(false);
-  const [serverUrl, setServerUrl] = useState('');
+  const [manualMode, setManualMode] = useState(!!prefillUrl);
+  const [serverUrl, setServerUrl] = useState(prefillUrl ?? '');
   const [token, setToken] = useState('');
   const [scanned, setScanned] = useState(false);
-  const scanLockRef = useRef(false); // Synchronous lock to prevent race conditions
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const scanLockRef = useRef(false);
 
-  const { addServer, isAuthenticated, servers, isLoading, error, clearError } = useAuthStore();
+  // Single-server auth model
+  const isInitializing = useAuthStateStore((s) => s.isInitializing);
+  const error = useAuthStateStore((s) => s.error);
+  const pairServer = useAuthStateStore((s) => s.pairServer);
+  const clearError = useAuthStateStore((s) => s.clearError);
 
-  // Check if this is adding an additional server vs first-time pairing
-  const isAddingServer = isAuthenticated && servers.length > 0;
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      scanLockRef.current = false;
+    };
+  }, []);
+
+  // Clear error when user starts typing
+  const handleServerUrlChange = useCallback(
+    (text: string) => {
+      setServerUrl(text);
+      if (error) clearError();
+    },
+    [error, clearError]
+  );
+
+  const handleTokenChange = useCallback(
+    (text: string) => {
+      setToken(text);
+      if (error) clearError();
+    },
+    [error, clearError]
+  );
+
+  const isLoading = isInitializing || isSubmitting;
 
   const handleBarCodeScanned = async ({ data }: { data: string }) => {
     // Use ref for synchronous check - state updates are async and cause race conditions
     if (scanLockRef.current || isLoading) return;
-    scanLockRef.current = true; // Immediate synchronous lock
+    scanLockRef.current = true;
     setScanned(true);
 
     try {
       // Parse tracearr://pair?data=<base64>
-      // First check if it even looks like our URL format
       if (!data.startsWith('tracearr://pair')) {
-        // Silently ignore non-Tracearr QR codes (don't spam alerts)
+        // Silently ignore non-Tracearr QR codes
         setTimeout(() => {
           scanLockRef.current = false;
           setScanned(false);
@@ -64,7 +94,7 @@ export default function PairScreen() {
         throw new Error('Invalid QR code: missing pairing data');
       }
 
-      // Decode and parse payload with proper error handling
+      // Decode and parse payload
       let payload: QRPairingPayload;
       try {
         const decoded = atob(base64Data);
@@ -73,7 +103,7 @@ export default function PairScreen() {
         throw new Error('Invalid QR code format. Please generate a new code.');
       }
 
-      // Validate payload has required fields
+      // Validate payload fields
       if (!payload.url || typeof payload.url !== 'string') {
         throw new Error('Invalid QR code: missing server URL');
       }
@@ -81,18 +111,40 @@ export default function PairScreen() {
         throw new Error('Invalid QR code: missing pairing token');
       }
 
-      // Validate URL format
-      if (!payload.url.startsWith('http://') && !payload.url.startsWith('https://')) {
-        throw new Error('Invalid server URL in QR code');
+      // Use shared validation
+      const validation = validateServerUrl(payload.url);
+      if (!validation.valid) {
+        throw new Error(validation.error);
       }
 
-      await addServer(payload.url, payload.token);
+      // Check for internal/localhost URL and warn
+      if (isInternalUrl(payload.url)) {
+        const choice = await showInternalUrlWarning();
+        if (choice === 'cancel') {
+          setTimeout(() => {
+            scanLockRef.current = false;
+            setScanned(false);
+          }, 1000);
+          return;
+        }
+        // User chose to continue - proceed with pairing
+        try {
+          await pairServer(payload.url, payload.token);
+          router.replace(ROUTES.TABS);
+        } catch {
+          // Error is stored in auth store - stay on screen
+          setTimeout(() => {
+            scanLockRef.current = false;
+            setScanned(false);
+          }, 3000);
+        }
+        return;
+      }
 
-      // Navigate to tabs after successful pairing
-      router.replace('/(drawer)/(tabs)' as never);
+      await pairServer(payload.url, payload.token);
+      router.replace(ROUTES.TABS);
     } catch (err) {
       Alert.alert('Pairing Failed', err instanceof Error ? err.message : 'Invalid QR code');
-      // Add cooldown before allowing another scan
       setTimeout(() => {
         scanLockRef.current = false;
         setScanned(false);
@@ -101,74 +153,81 @@ export default function PairScreen() {
   };
 
   const handleManualPair = async () => {
-    if (!serverUrl.trim() || !token.trim()) {
-      Alert.alert('Missing Fields', 'Please enter both server URL and token');
-      return;
-    }
+    if (isSubmitting || isInitializing) return;
+    setIsSubmitting(true);
+    clearError();
 
     const trimmedUrl = serverUrl.trim();
+    const trimmedToken = token.trim();
 
-    // Validate URL format
-    if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
-      Alert.alert('Invalid URL', 'Server URL must start with http:// or https://');
+    // Validate URL
+    const urlValidation = validateServerUrl(trimmedUrl);
+    if (!urlValidation.valid) {
+      Alert.alert('Invalid URL', urlValidation.error ?? 'Please enter a valid server URL');
+      setIsSubmitting(false);
       return;
     }
 
-    // Validate URL is well-formed
-    try {
-      new URL(trimmedUrl);
-    } catch {
-      Alert.alert('Invalid URL', 'Please enter a valid server URL');
+    // Validate token
+    if (!trimmedToken) {
+      Alert.alert('Missing Token', 'Please enter your access token');
+      setIsSubmitting(false);
       return;
     }
 
-    clearError();
-    try {
-      await addServer(trimmedUrl, token.trim());
-
-      // Navigate to tabs after successful pairing
-      router.replace('/(drawer)/(tabs)' as never);
-    } catch {
-      // Error is handled by the store
+    // Check for internal/localhost URL and warn
+    if (isInternalUrl(trimmedUrl)) {
+      const choice = await showInternalUrlWarning();
+      if (choice === 'cancel') {
+        setIsSubmitting(false);
+        return;
+      }
+      // User chose to continue - proceed with pairing
+      try {
+        await pairServer(trimmedUrl, trimmedToken);
+        router.replace(ROUTES.TABS);
+      } catch {
+        // Error stored in auth store - displayed below inputs
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
     }
-  };
 
-  const handleBack = () => {
-    router.back();
+    try {
+      await pairServer(trimmedUrl, trimmedToken);
+      router.replace(ROUTES.TABS);
+    } catch {
+      // Error is stored in auth store - stay on screen to show error
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (manualMode) {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#09090B' }} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboardView}
+          style={{ flex: 1 }}
         >
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            {/* Back button for adding servers */}
-            {isAddingServer && (
-              <Pressable style={styles.backButton} onPress={handleBack}>
-                <ChevronLeft size={24} color={colors.text.primary.dark} />
-                <Text style={styles.backText}>Back</Text>
-              </Pressable>
-            )}
-
-            <View style={styles.header}>
-              <Text style={styles.title}>
-                {isAddingServer ? 'Add Server' : 'Connect to Server'}
+          <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 24 }}>
+            <View className="items-center px-6 pt-8 pb-6">
+              <Text className="text-foreground mb-2 text-center text-2xl font-bold">
+                Connect to Server
               </Text>
-              <Text style={styles.subtitle}>
+              <Text className="text-muted-foreground text-center text-base leading-6">
                 Enter your Tracearr server URL and mobile access token
               </Text>
             </View>
 
-            <View style={styles.form}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Server URL</Text>
+            <View className="flex-1 gap-4">
+              <View className="gap-1">
+                <Text className="text-muted-foreground text-sm font-medium">Server URL</Text>
                 <TextInput
-                  style={styles.input}
+                  className="bg-card border-border text-foreground rounded-md border p-4 text-base"
                   value={serverUrl}
-                  onChangeText={setServerUrl}
+                  onChangeText={handleServerUrlChange}
                   placeholder="https://tracearr.example.com"
                   placeholderTextColor={colors.text.muted.dark}
                   autoCapitalize="none"
@@ -178,12 +237,12 @@ export default function PairScreen() {
                 />
               </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Access Token</Text>
+              <View className="gap-1">
+                <Text className="text-muted-foreground text-sm font-medium">Access Token</Text>
                 <TextInput
-                  style={styles.input}
+                  className="bg-card border-border text-foreground rounded-md border p-4 text-base"
                   value={token}
-                  onChangeText={setToken}
+                  onChangeText={handleTokenChange}
                   placeholder="trr_mob_..."
                   placeholderTextColor={colors.text.muted.dark}
                   autoCapitalize="none"
@@ -193,22 +252,27 @@ export default function PairScreen() {
                 />
               </View>
 
-              {error && <Text style={styles.errorText}>{error}</Text>}
+              {error && <Text className="text-destructive text-center text-sm">{error}</Text>}
 
               <Pressable
-                style={[styles.button, isLoading && styles.buttonDisabled]}
+                className={cn(
+                  'bg-primary mt-2 items-center rounded-md px-6 py-4',
+                  isLoading && 'opacity-60'
+                )}
                 onPress={handleManualPair}
                 disabled={isLoading}
               >
-                <Text style={styles.buttonText}>{isLoading ? 'Connecting...' : 'Connect'}</Text>
+                <Text className="text-primary-foreground text-base font-semibold">
+                  {isLoading ? 'Connecting...' : 'Connect'}
+                </Text>
               </Pressable>
 
               <Pressable
-                style={styles.linkButton}
+                className="items-center py-4"
                 onPress={() => setManualMode(false)}
                 disabled={isLoading}
               >
-                <Text style={styles.linkText}>Scan QR Code Instead</Text>
+                <Text className="text-primary text-base">Scan QR Code Instead</Text>
               </Pressable>
             </View>
           </ScrollView>
@@ -218,187 +282,86 @@ export default function PairScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      {/* Back button for adding servers */}
-      {isAddingServer && (
-        <Pressable style={styles.backButton} onPress={handleBack}>
-          <ChevronLeft size={24} color={colors.text.primary.dark} />
-          <Text style={styles.backText}>Back</Text>
-        </Pressable>
-      )}
-
-      <View style={styles.header}>
-        <Text style={styles.title}>{isAddingServer ? 'Add Server' : 'Welcome to Tracearr'}</Text>
-        <Text style={styles.subtitle}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#09090B' }} edges={['top', 'bottom']}>
+      <View
+        style={{ alignItems: 'center', paddingHorizontal: 24, paddingTop: 32, paddingBottom: 24 }}
+      >
+        <Text className="text-foreground mb-2 text-center text-2xl font-bold">
+          Welcome to Tracearr
+        </Text>
+        <Text className="text-muted-foreground text-center text-base leading-6">
           Open Settings → Mobile App in your Tracearr dashboard and scan the QR code
         </Text>
       </View>
 
-      <View style={styles.cameraContainer}>
+      <View
+        style={{
+          flex: 1,
+          marginHorizontal: 24,
+          marginBottom: 24,
+          borderRadius: 16,
+          overflow: 'hidden',
+          backgroundColor: '#09090B',
+        }}
+      >
         {permission?.granted ? (
-          <CameraView
-            style={styles.camera}
-            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-          >
-            <View style={styles.overlay}>
-              <View style={styles.scanFrame} />
+          <View style={{ flex: 1 }}>
+            <CameraView
+              style={StyleSheet.absoluteFill}
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+            />
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                justifyContent: 'center',
+                alignItems: 'center',
+                backgroundColor: 'rgba(0,0,0,0.3)',
+              }}
+            >
+              <View
+                style={{
+                  width: 250,
+                  height: 250,
+                  borderWidth: 2,
+                  borderColor: '#18D1E7',
+                  borderRadius: 12,
+                }}
+              />
             </View>
-          </CameraView>
+          </View>
         ) : (
-          <View style={styles.permissionContainer}>
-            <Text style={styles.permissionText}>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+            <Text className="text-muted-foreground mb-6 text-center text-base">
               Camera permission is required to scan QR codes
             </Text>
-            <Pressable style={styles.button} onPress={requestPermission}>
-              <Text style={styles.buttonText}>Grant Permission</Text>
+            <Pressable
+              style={{
+                backgroundColor: '#18D1E7',
+                paddingVertical: 16,
+                paddingHorizontal: 24,
+                borderRadius: 8,
+                alignItems: 'center',
+              }}
+              onPress={requestPermission}
+            >
+              <Text style={{ fontSize: 16, fontWeight: '600', color: '#18181B' }}>
+                Grant Permission
+              </Text>
             </Pressable>
           </View>
         )}
       </View>
 
-      <View style={styles.footer}>
-        <Pressable style={styles.linkButton} onPress={() => setManualMode(true)}>
-          <Text style={styles.linkText}>Enter URL and Token Manually</Text>
+      <View className="items-center px-6 pb-6">
+        <Pressable className="items-center py-4" onPress={() => setManualMode(true)}>
+          <Text className="text-primary text-base">Enter URL and Token Manually</Text>
         </Pressable>
       </View>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background.dark,
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: spacing.lg,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  backText: {
-    fontSize: typography.fontSize.base,
-    color: colors.text.primary.dark,
-    marginLeft: spacing.xs,
-  },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.lg,
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: typography.fontSize['2xl'],
-    fontWeight: 'bold',
-    color: colors.text.primary.dark,
-    marginBottom: spacing.sm,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: typography.fontSize.base,
-    color: colors.text.secondary.dark,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  cameraContainer: {
-    flex: 1,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.lg,
-    borderRadius: borderRadius.xl,
-    overflow: 'hidden',
-    backgroundColor: colors.card.dark,
-  },
-  camera: {
-    flex: 1,
-  },
-  overlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  scanFrame: {
-    width: 250,
-    height: 250,
-    borderWidth: 2,
-    borderColor: colors.cyan.core,
-    borderRadius: borderRadius.lg,
-    backgroundColor: 'transparent',
-  },
-  permissionContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  permissionText: {
-    fontSize: typography.fontSize.base,
-    color: colors.text.secondary.dark,
-    textAlign: 'center',
-    marginBottom: spacing.lg,
-  },
-  footer: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
-    alignItems: 'center',
-  },
-  form: {
-    flex: 1,
-    gap: spacing.md,
-  },
-  inputGroup: {
-    gap: spacing.xs,
-  },
-  label: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: '500',
-    color: colors.text.secondary.dark,
-  },
-  input: {
-    backgroundColor: colors.card.dark,
-    borderWidth: 1,
-    borderColor: colors.border.dark,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    fontSize: typography.fontSize.base,
-    color: colors.text.primary.dark,
-  },
-  button: {
-    backgroundColor: colors.cyan.core,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    marginTop: spacing.sm,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    fontSize: typography.fontSize.base,
-    fontWeight: '600',
-    color: colors.blue.core,
-  },
-  linkButton: {
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  linkText: {
-    fontSize: typography.fontSize.base,
-    color: colors.cyan.core,
-  },
-  errorText: {
-    fontSize: typography.fontSize.sm,
-    color: colors.error,
-    textAlign: 'center',
-  },
-});

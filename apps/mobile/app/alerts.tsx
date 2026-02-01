@@ -8,14 +8,7 @@
  * - Tablet (md+): 2-column grid, filters row, larger avatars
  */
 import { useState, useMemo } from 'react';
-import {
-  View,
-  FlatList,
-  RefreshControl,
-  Pressable,
-  ActivityIndicator,
-  StyleSheet,
-} from 'react-native';
+import { View, FlatList, RefreshControl, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInfiniteQuery, useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -41,7 +34,7 @@ import { Text } from '@/components/ui/text';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { UserAvatar } from '@/components/ui/user-avatar';
-import { colors, spacing, borderRadius, withAlpha } from '@/lib/theme';
+import { colors, spacing, ACCENT_COLOR } from '@/lib/theme';
 import type {
   ViolationWithDetails,
   RuleType,
@@ -155,42 +148,74 @@ function RuleIcon({ ruleType }: { ruleType: RuleType | undefined }) {
   const IconComponent = ruleType ? ruleIcons[ruleType] : AlertTriangle;
   return (
     <View className="bg-surface h-8 w-8 items-center justify-center rounded-lg">
-      <IconComponent size={16} color={colors.cyan.core} />
+      <IconComponent size={16} color={ACCENT_COLOR} />
     </View>
   );
 }
 
-interface FilterChipProps {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}
-
-function FilterChip({ label, active, onPress }: FilterChipProps) {
+// Segmented control matching History page pattern
+function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
   return (
-    <Pressable
-      onPress={onPress}
+    <View
       style={{
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-        borderRadius: borderRadius.full,
-        backgroundColor: active ? colors.cyan.core : colors.card.dark,
-        borderWidth: 1,
-        borderColor: active ? colors.cyan.core : colors.border.dark,
+        flexDirection: 'row',
+        backgroundColor: colors.surface.dark,
+        borderRadius: 8,
+        padding: 4,
       }}
     >
-      <Text
-        style={{
-          fontSize: 13,
-          fontWeight: active ? '600' : '400',
-          color: active ? 'white' : colors.text.secondary.dark,
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
+      {options.map((option) => {
+        const isSelected = value === option.value;
+        return (
+          <Pressable
+            key={option.value}
+            onPress={() => onChange(option.value)}
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              borderRadius: 6,
+              backgroundColor: isSelected ? colors.card.dark : 'transparent',
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: '600',
+                color: isSelected ? colors.text.primary.dark : colors.text.muted.dark,
+              }}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
+
+const SEVERITY_OPTIONS: { value: ViolationSeverity | 'all'; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'high', label: 'High' },
+  { value: 'warning', label: 'Warning' },
+  { value: 'low', label: 'Low' },
+];
+
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'acknowledged', label: 'Done' },
+];
 
 function ViolationCard({
   violation,
@@ -240,7 +265,7 @@ function ViolationCard({
         <View className="mb-3 flex-row items-start gap-3">
           <RuleIcon ruleType={ruleType} />
           <View className="flex-1">
-            <Text className="text-cyan-core mb-1 text-sm font-medium">{ruleName}</Text>
+            <Text className="text-primary mb-1 text-sm font-medium">{ruleName}</Text>
             <Text className="text-secondary text-sm leading-5" numberOfLines={2}>
               {description}
             </Text>
@@ -250,14 +275,14 @@ function ViolationCard({
         {/* Action Button */}
         {!violation.acknowledgedAt ? (
           <Pressable
-            className="bg-cyan-core/15 flex-row items-center justify-center gap-2 rounded-lg py-2.5 active:opacity-70"
+            className="bg-primary/15 flex-row items-center justify-center gap-2 rounded-lg py-2.5 active:opacity-70"
             onPress={(e) => {
               e.stopPropagation();
               onAcknowledge();
             }}
           >
-            <Check size={16} color={colors.cyan.core} />
-            <Text className="text-cyan-core text-sm font-semibold">Acknowledge</Text>
+            <Check size={16} color={ACCENT_COLOR} />
+            <Text className="text-primary text-sm font-semibold">Acknowledge</Text>
           </Pressable>
         ) : (
           <View className="bg-success/10 flex-row items-center justify-center gap-2 rounded-lg py-2.5">
@@ -275,6 +300,7 @@ export default function AlertsScreen() {
   const queryClient = useQueryClient();
   const { selectedServerId } = useMediaServer();
   const { isTablet, select } = useResponsive();
+  const insets = useSafeAreaInsets();
 
   // Filter state
   const [severityFilter, setSeverityFilter] = useState<ViolationSeverity | 'all'>('all');
@@ -346,7 +372,6 @@ export default function AlertsScreen() {
   };
 
   const hasActiveFilters = severityFilter !== 'all' || statusFilter !== 'all';
-  const insets = useSafeAreaInsets();
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -359,21 +384,24 @@ export default function AlertsScreen() {
 
   return (
     <SafeAreaView
-      style={{ flex: 1, backgroundColor: colors.background.dark }}
+      style={{ flex: 1, backgroundColor: '#09090B' }}
       edges={['left', 'right', 'bottom']}
     >
       {/* Header with back button */}
-      <View style={[headerStyles.container, { paddingTop: insets.top }]}>
-        <View style={headerStyles.content}>
+      <View
+        className="border-border border-b"
+        style={{ paddingTop: insets.top, backgroundColor: colors.background.dark }}
+      >
+        <View className="h-14 flex-row items-center justify-between px-4">
           <Pressable
             onPress={handleBack}
-            style={headerStyles.backButton}
+            className="h-11 w-11 items-center justify-center rounded-lg"
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <ChevronLeft size={24} color={colors.text.primary.dark} />
           </Pressable>
-          <Text style={headerStyles.title}>Alerts</Text>
-          <View style={headerStyles.spacer} />
+          <Text className="text-[17px] font-semibold">Alerts</Text>
+          <View className="w-11" />
         </View>
       </View>
 
@@ -407,79 +435,42 @@ export default function AlertsScreen() {
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.5}
         refreshControl={
-          <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={refetch}
-            tintColor={colors.cyan.core}
-          />
+          <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={ACCENT_COLOR} />
         }
         ListHeaderComponent={
-          <View style={{ marginBottom: spacing.md }}>
-            {/* Title row */}
-            <View className="mb-3 flex-row items-center justify-between">
-              <View>
-                <Text className="text-lg font-semibold">Alerts</Text>
-                <Text className="text-muted-foreground text-sm">
-                  {hasActiveFilters ? `${violations.length} of ` : ''}
-                  {total} {total === 1 ? 'violation' : 'violations'}
-                </Text>
-              </View>
+          <View className="mb-4 gap-3">
+            {/* Summary row */}
+            <View className="flex-row items-center justify-between">
+              <Text className="text-muted-foreground text-sm">
+                {hasActiveFilters ? `${violations.length} of ` : ''}
+                {total} {total === 1 ? 'alert' : 'alerts'}
+              </Text>
               {unacknowledgedCount > 0 && statusFilter !== 'acknowledged' && (
-                <View className="bg-destructive/20 rounded-lg px-3 py-1.5">
-                  <Text className="text-destructive text-sm font-medium">
+                <View className="bg-destructive/20 rounded-full px-3 py-1">
+                  <Text className="text-destructive text-xs font-semibold">
                     {unacknowledgedCount} pending
                   </Text>
                 </View>
               )}
             </View>
 
-            {/* Filters */}
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: spacing.sm,
-                marginBottom: spacing.xs,
-              }}
-            >
-              <Filter size={14} color={colors.text.muted.dark} />
-              <Text className="text-muted-foreground text-xs font-medium">FILTERS</Text>
+            {/* Severity filter */}
+            <View className="gap-1.5">
+              <Text className="text-muted-foreground text-xs font-medium">Severity</Text>
+              <SegmentedControl
+                options={SEVERITY_OPTIONS}
+                value={severityFilter}
+                onChange={setSeverityFilter}
+              />
             </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
-              {/* Severity filters */}
-              <FilterChip
-                label="All"
-                active={severityFilter === 'all'}
-                onPress={() => setSeverityFilter('all')}
-              />
-              <FilterChip
-                label="High"
-                active={severityFilter === 'high'}
-                onPress={() => setSeverityFilter('high')}
-              />
-              <FilterChip
-                label="Warning"
-                active={severityFilter === 'warning'}
-                onPress={() => setSeverityFilter('warning')}
-              />
-              <FilterChip
-                label="Low"
-                active={severityFilter === 'low'}
-                onPress={() => setSeverityFilter('low')}
-              />
-              <View style={{ width: spacing.sm }} />
-              {/* Status filters */}
-              <FilterChip
-                label="Pending"
-                active={statusFilter === 'pending'}
-                onPress={() => setStatusFilter(statusFilter === 'pending' ? 'all' : 'pending')}
-              />
-              <FilterChip
-                label="Acknowledged"
-                active={statusFilter === 'acknowledged'}
-                onPress={() =>
-                  setStatusFilter(statusFilter === 'acknowledged' ? 'all' : 'acknowledged')
-                }
+
+            {/* Status filter */}
+            <View className="gap-1.5">
+              <Text className="text-muted-foreground text-xs font-medium">Status</Text>
+              <SegmentedControl
+                options={STATUS_OPTIONS}
+                value={statusFilter}
+                onChange={setStatusFilter}
               />
             </View>
           </View>
@@ -487,80 +478,115 @@ export default function AlertsScreen() {
         ListFooterComponent={
           isFetchingNextPage ? (
             <View className="items-center py-4">
-              <ActivityIndicator size="small" color={colors.cyan.core} />
+              <ActivityIndicator size="small" color={ACCENT_COLOR} />
             </View>
           ) : null
         }
         ListEmptyComponent={
-          <View style={emptyStyles.container}>
-            <View style={emptyStyles.icon}>
-              <Check size={32} color={colors.success} />
-            </View>
-            <Text style={emptyStyles.title}>{hasActiveFilters ? 'No Matches' : 'All Clear'}</Text>
-            <Text style={emptyStyles.subtitle}>
-              {hasActiveFilters ? 'Try adjusting your filters' : 'No rule violations detected'}
-            </Text>
+          <View
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingHorizontal: 24,
+              paddingVertical: 80,
+            }}
+          >
+            {hasActiveFilters ? (
+              <>
+                {/* No matches for current filters */}
+                <View
+                  style={{
+                    width: 72,
+                    height: 72,
+                    borderRadius: 36,
+                    backgroundColor: colors.surface.dark,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 20,
+                  }}
+                >
+                  <Filter size={32} color={colors.text.muted.dark} />
+                </View>
+                <Text
+                  style={{
+                    fontSize: 20,
+                    fontWeight: '600',
+                    color: colors.text.primary.dark,
+                    marginBottom: 8,
+                  }}
+                >
+                  No Matches
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 14,
+                    color: colors.text.muted.dark,
+                    textAlign: 'center',
+                    marginBottom: 24,
+                    lineHeight: 20,
+                  }}
+                >
+                  Try adjusting your filters
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    setSeverityFilter('all');
+                    setStatusFilter('all');
+                  }}
+                  style={{
+                    backgroundColor: colors.surface.dark,
+                    paddingHorizontal: 20,
+                    paddingVertical: 10,
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ color: ACCENT_COLOR, fontSize: 14, fontWeight: '600' }}>
+                    Clear Filters
+                  </Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                {/* All clear - simple centered design */}
+                <View
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: 40,
+                    backgroundColor: `${colors.success}20`,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 24,
+                  }}
+                >
+                  <Check size={40} color={colors.success} strokeWidth={2.5} />
+                </View>
+                <Text
+                  style={{
+                    fontSize: 22,
+                    fontWeight: '700',
+                    color: colors.text.primary.dark,
+                    marginBottom: 8,
+                  }}
+                >
+                  All Clear
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 14,
+                    color: colors.text.muted.dark,
+                    textAlign: 'center',
+                    lineHeight: 20,
+                  }}
+                >
+                  No rule violations detected
+                </Text>
+              </>
+            )}
           </View>
         }
       />
     </SafeAreaView>
   );
 }
-
-const emptyStyles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    paddingVertical: spacing.xxl,
-    paddingHorizontal: spacing.lg,
-  },
-  icon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: withAlpha(colors.success, '15'),
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.md,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.text.primary.dark,
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.text.muted.dark,
-    textAlign: 'center',
-  },
-});
-
-const headerStyles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.background.dark,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.dark,
-  },
-  content: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    height: 56,
-    paddingHorizontal: spacing.md,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-  },
-  title: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.text.primary.dark,
-  },
-  spacer: {
-    width: 44,
-  },
-});

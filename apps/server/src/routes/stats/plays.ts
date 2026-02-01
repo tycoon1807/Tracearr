@@ -23,6 +23,25 @@ import { MEDIA_TYPE_SQL_FILTER } from '../../constants/index.js';
 // Minimum session duration for a "valid" play (2 minutes in milliseconds)
 const MIN_PLAY_DURATION_MS = 120000;
 
+/**
+ * Get bucket interval based on the requested period.
+ * Returns interval string for TimescaleDB time_bucket().
+ */
+function getBucketInterval(period: string): string {
+  switch (period) {
+    case 'day':
+      return '1 hour';
+    case 'week':
+      return '6 hours';
+    case 'month':
+    case 'year':
+      return '1 day';
+    case 'all':
+    default:
+      return '1 week';
+  }
+}
+
 // NOTE: Kept for potential future use with daily_content_engagement view queries
 // Currently unused since plays-by-dayofweek now queries sessions table directly
 // for proper timezone handling.
@@ -101,8 +120,9 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const serverFilter = buildSessionServerFilter(serverId, authUser);
+    const bucketInterval = getBucketInterval(period);
 
-    // Query sessions table directly with timezone-aware day bucketing
+    // Query sessions table with time_bucket for flexible granularity
     const baseWhere = dateRange.start
       ? sql`WHERE started_at >= ${dateRange.start} AND duration_ms >= ${MIN_PLAY_DURATION_MS}`
       : sql`WHERE duration_ms >= ${MIN_PLAY_DURATION_MS}`;
@@ -112,7 +132,7 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
 
     const result = await db.execute(sql`
         SELECT
-          (started_at AT TIME ZONE ${tz})::date::text as date,
+          time_bucket(${bucketInterval}::interval, started_at AT TIME ZONE ${tz})::text as date,
           COUNT(DISTINCT COALESCE(reference_id, id))::int as count
         FROM sessions
         ${baseWhere}

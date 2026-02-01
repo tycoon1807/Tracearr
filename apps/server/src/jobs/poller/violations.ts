@@ -441,12 +441,22 @@ export async function createViolation(
 // ============================================================================
 
 /**
+ * Minimal rule info needed for violation broadcasting.
+ * Supports both V1 (legacy) and V2 rules.
+ */
+export interface ViolationRuleInfo {
+  id: string;
+  name: string;
+  type: RuleType | null; // null for V2 rules
+}
+
+/**
  * Result of creating a violation within a transaction.
  * Contains data needed for post-transaction broadcasting.
  */
 export interface ViolationInsertResult {
   violation: typeof violations.$inferSelect;
-  rule: Rule;
+  rule: Rule | ViolationRuleInfo;
   trustPenalty: number;
 }
 
@@ -552,6 +562,9 @@ export async function broadcastViolations(
   if (!details) return;
 
   for (const { violation, rule } of violationResults) {
+    // Get rule type - null for V2 rules
+    const ruleType = 'type' in rule ? rule.type : null;
+
     const violationWithDetails: ViolationWithDetails = {
       id: violation.id,
       ruleId: violation.ruleId,
@@ -571,7 +584,7 @@ export async function broadcastViolations(
       rule: {
         id: rule.id,
         name: rule.name,
-        type: rule.type,
+        type: ruleType,
       },
       server: {
         id: details.serverId,

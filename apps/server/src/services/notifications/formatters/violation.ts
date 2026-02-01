@@ -50,7 +50,8 @@ export function sanitizeForDiscord(text: string): string {
 /**
  * Get the rule display name for a violation
  */
-export function getRuleDisplayName(ruleType: string): string {
+export function getRuleDisplayName(ruleType: string | null): string {
+  if (!ruleType) return 'Custom Rule';
   return RULE_DISPLAY_NAMES[ruleType as keyof typeof RULE_DISPLAY_NAMES] ?? ruleType;
 }
 
@@ -80,10 +81,10 @@ export interface DiscordField {
  * Format violation details into Discord embed fields based on rule type
  */
 export function formatViolationDetailsForDiscord(
-  ruleType: string,
+  ruleType: string | null,
   data: Record<string, unknown> | null
 ): DiscordField[] {
-  if (!data) return [];
+  if (!data || !ruleType) return [];
 
   switch (ruleType) {
     case 'impossible_travel': {
@@ -289,8 +290,8 @@ export function formatViolationDetailsForDiscord(
  */
 export function formatViolationMessage(violation: ViolationWithDetails): string {
   const userName = violation.user.identityName ?? violation.user.username;
-  const ruleType = violation.rule.type as keyof typeof RULE_DISPLAY_NAMES;
+  const ruleName = getRuleDisplayName(violation.rule.type);
   const severity = violation.severity as keyof typeof SEVERITY_LEVELS;
 
-  return `User ${userName} triggered ${RULE_DISPLAY_NAMES[ruleType]} (${SEVERITY_LEVELS[severity].label} severity)`;
+  return `User ${userName} triggered ${ruleName} (${SEVERITY_LEVELS[severity].label} severity)`;
 }

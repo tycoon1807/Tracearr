@@ -279,3 +279,12 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* Fix Radix ScrollArea horizontal overflow bug
+ * See: https://github.com/radix-ui/primitives/issues/2722
+ * The ScrollArea viewport uses display:table internally which causes
+ * unintended horizontal expansion. This override restores expected behavior.
+ */
+[data-radix-scroll-area-viewport] > div {
+  display: block !important;
+}

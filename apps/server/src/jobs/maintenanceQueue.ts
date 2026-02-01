@@ -11,6 +11,13 @@
  */
 
 import { Queue, Worker, type Job, type ConnectionOptions } from 'bullmq';
+import { extendJobLock } from './lockUtils.js';
+import {
+  acquireHeavyOpsLock,
+  releaseHeavyOpsLock,
+  extendHeavyOpsLock,
+  type HeavyOpsLockHolder,
+} from './heavyOpsLock.js';
 import type {
   MaintenanceJobProgress,
   MaintenanceJobResult,
@@ -22,8 +29,15 @@ import { db } from '../db/client.js';
 import { sessions, serverUsers } from '../db/schema.js';
 import { normalizeClient, normalizePlatformName } from '../utils/platformNormalizer.js';
 import { getPubSubService } from '../services/cache.js';
-import { rebuildTimescaleViews } from '../db/timescale.js';
-import { INVALID_SNAPSHOT_CONDITION } from '../utils/snapshotValidation.js';
+import {
+  rebuildTimescaleViews,
+  safeFullRefreshAllAggregates,
+  type AggregateRefreshProgress,
+} from '../db/timescale.js';
+import {
+  INVALID_SNAPSHOT_CONDITION,
+  VALID_LIBRARY_ITEM_CONDITION,
+} from '../utils/snapshotValidation.js';
 import countries from 'i18n-iso-countries';
 import countriesEn from 'i18n-iso-countries/langs/en.json' with { type: 'json' };
 
@@ -34,6 +48,22 @@ countries.registerLocale(countriesEn);
 // Handles common variations like "United States", "USA", "United Kingdom", etc.
 function getCountryCode(name: string): string | undefined {
   return countries.getAlpha2Code(name, 'en') ?? undefined;
+}
+
+// Human-readable descriptions for maintenance job types (used in "Waiting for X" messages)
+function getMaintenanceJobDescription(type: MaintenanceJobType): string {
+  const descriptions: Record<MaintenanceJobType, string> = {
+    normalize_players: 'Player normalization',
+    normalize_countries: 'Country normalization',
+    fix_imported_progress: 'Progress fix',
+    rebuild_timescale_views: 'TimescaleDB view rebuild',
+    normalize_codecs: 'Codec normalization',
+    backfill_user_dates: 'User dates backfill',
+    backfill_library_snapshots: 'Library snapshots backfill',
+    cleanup_old_chunks: 'Old chunks cleanup',
+    full_aggregate_rebuild: 'Full aggregate rebuild',
+  };
+  return descriptions[type] || type;
 }
 
 // Job data types
@@ -71,7 +101,7 @@ export function initMaintenanceQueue(redisUrl: string): void {
   maintenanceQueue = new Queue<MaintenanceJobData>(QUEUE_NAME, {
     connection: connectionOptions,
     defaultJobOptions: {
-      attempts: 1, // Maintenance jobs should not retry automatically
+      attempts: 3, // Allow retries for stalled job recovery after server restart
       removeOnComplete: {
         count: 50, // Keep last 50 completed jobs
         age: 7 * 24 * 60 * 60, // 7 days
@@ -99,11 +129,117 @@ export function startMaintenanceWorker(): void {
     return;
   }
 
+  // Recover any stuck jobs from a previous crash before starting the worker
+  // If the server restarted, any "active" job is orphaned (worker died)
+  if (maintenanceQueue) {
+    maintenanceQueue
+      .getJobs(['active'])
+      .then(async (stuckJobs) => {
+        if (stuckJobs.length > 0) {
+          console.log(
+            `[Maintenance] Found ${stuckJobs.length} stuck job(s) from previous run, recovering...`
+          );
+          for (const job of stuckJobs) {
+            try {
+              // Move back to waiting so the new worker can pick it up
+              await job.retry('failed');
+              console.log(`[Maintenance] Recovered stuck job ${job.id} - moved to waiting`);
+            } catch (err) {
+              // If moveToWaiting fails, try removing and re-adding
+              console.warn(`[Maintenance] Failed to recover job ${job.id}, removing:`, err);
+              try {
+                await job.remove();
+              } catch {
+                // Job might have already been handled
+              }
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[Maintenance] Failed to check for stuck jobs:', err);
+      });
+  }
+
   maintenanceWorker = new Worker<MaintenanceJobData>(
     QUEUE_NAME,
     async (job: Job<MaintenanceJobData>) => {
       const startTime = Date.now();
+      const jobStartedAt = new Date().toISOString();
+      const jobDescription = getMaintenanceJobDescription(job.data.type);
       console.log(`[Maintenance] Starting job ${job.id} (${job.data.type})`);
+
+      // Initialize cached progress immediately so Running Tasks can show it
+      activeJobProgress = {
+        type: job.data.type,
+        status: 'waiting',
+        totalRecords: 0,
+        processedRecords: 0,
+        updatedRecords: 0,
+        skippedRecords: 0,
+        errorRecords: 0,
+        message: 'Starting...',
+        startedAt: jobStartedAt,
+      };
+
+      // Acquire heavy operations lock (waits if another heavy op is running)
+      let lockHolder: HeavyOpsLockHolder | null;
+      const pubSubService = getPubSubService();
+      const WAIT_INTERVAL_MS = 5000; // Check every 5 seconds
+      const MAX_WAIT_MS = 4 * 60 * 60 * 1000; // Max 4 hours wait
+      let waitedMs = 0;
+
+      while (
+        (lockHolder = await acquireHeavyOpsLock('maintenance', job.id!, jobDescription)) !== null
+      ) {
+        // Update cached progress with waiting status
+        activeJobProgress = {
+          type: job.data.type,
+          status: 'waiting',
+          totalRecords: 0,
+          processedRecords: 0,
+          updatedRecords: 0,
+          skippedRecords: 0,
+          errorRecords: 0,
+          message: `Waiting for ${lockHolder.description} to complete...`,
+          startedAt: jobStartedAt,
+          waitingFor: {
+            jobType: lockHolder.jobType,
+            description: lockHolder.description,
+            startedAt: lockHolder.startedAt,
+          },
+        };
+
+        // Broadcast waiting status to frontend
+        if (pubSubService) {
+          void pubSubService.publish(WS_EVENTS.MAINTENANCE_PROGRESS, activeJobProgress);
+        }
+
+        console.log(
+          `[Maintenance] Job ${job.id} waiting for ${lockHolder.jobType} job: ${lockHolder.description}`
+        );
+
+        // Extend BullMQ job lock while waiting
+        await extendJobLock(job);
+
+        // Wait before retry
+        await new Promise((resolve) => setTimeout(resolve, WAIT_INTERVAL_MS));
+        waitedMs += WAIT_INTERVAL_MS;
+
+        if (waitedMs >= MAX_WAIT_MS) {
+          activeJobProgress = null;
+          throw new Error(
+            `Timed out waiting for ${lockHolder.description} after ${MAX_WAIT_MS / 1000 / 60} minutes`
+          );
+        }
+      }
+
+      // Update status now that we have the lock
+      activeJobProgress.status = 'running';
+      activeJobProgress.message = 'Acquired lock, starting...';
+      activeJobProgress.waitingFor = undefined;
+
+      console.log(`[Maintenance] Job ${job.id} acquired heavy ops lock`);
 
       try {
         const result = await processMaintenanceJob(job);
@@ -114,6 +250,10 @@ export function startMaintenanceWorker(): void {
         const duration = Math.round((Date.now() - startTime) / 1000);
         console.error(`[Maintenance] Job ${job.id} failed after ${duration}s:`, error);
         throw error;
+      } finally {
+        // Always release the heavy ops lock
+        await releaseHeavyOpsLock(job.id!);
+        console.log(`[Maintenance] Job ${job.id} released heavy ops lock`);
       }
     },
     {
@@ -177,6 +317,10 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<Main
       return processBackfillUserDatesJob(job);
     case 'backfill_library_snapshots':
       return processBackfillLibrarySnapshotsJob(job);
+    case 'cleanup_old_chunks':
+      return processCleanupOldChunksJob(job);
+    case 'full_aggregate_rebuild':
+      return processFullAggregateRebuildJob(job);
     default:
       throw new Error(`Unknown maintenance job type: ${job.data.type}`);
   }
@@ -364,12 +508,9 @@ async function processNormalizePlayersJob(
       await job.updateProgress(percent);
       await publishProgress();
 
-      // Extend lock to prevent stalled job detection
-      try {
-        await job.extendLock(job.token ?? '', 10 * 60 * 1000);
-      } catch {
-        console.warn(`[Maintenance] Failed to extend lock for job ${job.id}`);
-      }
+      // Extend locks - fails fast if lock is lost to avoid wasted work
+      await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
 
       // Brief pause between batches to let other operations through
       if (totalProcessed < totalRecords) {
@@ -596,11 +737,9 @@ async function processNormalizeCountriesJob(
       await job.updateProgress(percent);
       await publishProgress();
 
-      try {
-        await job.extendLock(job.token ?? '', 10 * 60 * 1000);
-      } catch {
-        console.warn(`[Maintenance] Failed to extend lock for job ${job.id}`);
-      }
+      // Extend locks - fails fast if lock is lost to avoid wasted work
+      await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
 
       if (totalProcessed < totalRecords) {
         await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
@@ -831,11 +970,9 @@ async function processFixImportedProgressJob(
       await job.updateProgress(percent);
       await publishProgress();
 
-      try {
-        await job.extendLock(job.token ?? '', 10 * 60 * 1000);
-      } catch {
-        console.warn(`[Maintenance] Failed to extend lock for job ${job.id}`);
-      }
+      // Extend locks - fails fast if lock is lost to avoid wasted work
+      await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
 
       if (totalProcessed < totalRecords) {
         await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
@@ -907,6 +1044,10 @@ async function processRebuildTimescaleViewsJob(
 
     const fullRefresh = job.data.options?.fullRefresh ?? false;
 
+    // Track last lock extension to avoid excessive Redis calls
+    let lastLockExtension = Date.now();
+    const LOCK_EXTENSION_INTERVAL = 60 * 1000; // Extend lock every 60 seconds
+
     // Call the rebuild function with options
     const result = await rebuildTimescaleViews({
       fullRefresh,
@@ -921,6 +1062,12 @@ async function processRebuildTimescaleViewsJob(
         // Update job progress percentage
         const percent = Math.round((step / total) * 100);
         void job.updateProgress(percent);
+
+        // Extend lock periodically to prevent stalled job detection
+        if (Date.now() - lastLockExtension > LOCK_EXTENSION_INTERVAL) {
+          void extendJobLock(job);
+          lastLockExtension = Date.now();
+        }
       },
     });
 
@@ -1091,11 +1238,9 @@ async function processNormalizeCodecsJob(
       await job.updateProgress(percent);
       await publishProgress();
 
-      try {
-        await job.extendLock(job.token ?? '', 10 * 60 * 1000);
-      } catch {
-        console.warn(`[Maintenance] Failed to extend lock for job ${job.id}`);
-      }
+      // Extend locks - fails fast if lock is lost to avoid wasted work
+      await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
     }
 
     const durationMs = Date.now() - startTime;
@@ -1229,6 +1374,10 @@ async function processBackfillUserDatesJob(
     await job.updateProgress(50);
     await publishProgress();
 
+    // Extend locks after first bulk update - these can take time on large databases
+    await extendJobLock(job);
+    await extendHeavyOpsLock(job.id!);
+
     // Step 2: Update lastActivityAt to most recent session for all users with sessions
     // We update even if not NULL to ensure it's the most recent activity
     try {
@@ -1248,6 +1397,10 @@ async function processBackfillUserDatesJob(
       console.error('[Maintenance] Error updating lastActivityAt:', error);
       totalErrors++;
     }
+
+    // Extend locks after second bulk update
+    await extendJobLock(job);
+    await extendHeavyOpsLock(job.id!);
 
     const totalUpdated = joinedAtUpdated + lastActivityUpdated;
     const durationMs = Date.now() - startTime;
@@ -1291,16 +1444,21 @@ async function processBackfillUserDatesJob(
  * cumulative window functions on item creation dates. This enables proper
  * deletion/upgrade tracking in charts by preserving historical state.
  *
- * Process:
- * 1. Get all server+library combinations with their date ranges
- * 2. For each library, generate daily snapshots using window functions
- * 3. Skip days that already have snapshots (idempotent)
+ * OPTIMIZED: Single-pass algorithm (O(n) instead of O(n²))
+ *
+ * This maintains batch INSERTs for lock management while eliminating redundant
+ * cumulative recalculations that previously made each batch scan the entire history.
  */
 async function processBackfillLibrarySnapshotsJob(
   job: Job<MaintenanceJobData>
 ): Promise<MaintenanceJobResult> {
   const startTime = Date.now();
   const pubSubService = getPubSubService();
+
+  // Batch size in days to avoid exhausting PostgreSQL's lock table
+  // TimescaleDB hypertables create locks per chunk, so large date ranges
+  // spanning many chunks can hit max_locks_per_transaction limits
+  const BATCH_SIZE_DAYS = 90;
 
   // Initialize progress
   activeJobProgress = {
@@ -1324,7 +1482,15 @@ async function processBackfillLibrarySnapshotsJob(
   try {
     await publishProgress();
 
+    // Extend locks before initial scan - can be slow on large libraries
+    await extendJobLock(job);
+    await extendHeavyOpsLock(job.id!);
+
     // Get all server+library combinations with their date ranges
+    // Only consider items with valid file_size (consistent with INVALID_SNAPSHOT_CONDITION
+    // which deletes snapshots with total_size=0). This prevents an infinite loop where
+    // backfill creates snapshots for items without file_size, cleanup deletes them,
+    // and the next check triggers backfill again.
     const librariesResult = await db.execute(sql`
       SELECT
         server_id,
@@ -1334,6 +1500,7 @@ async function processBackfillLibrarySnapshotsJob(
         COUNT(*) AS item_count
       FROM library_items
       WHERE created_at IS NOT NULL
+        AND ${VALID_LIBRARY_ITEM_CONDITION}
       GROUP BY server_id, library_id
     `);
 
@@ -1347,7 +1514,7 @@ async function processBackfillLibrarySnapshotsJob(
 
     if (libraries.length === 0) {
       activeJobProgress.status = 'complete';
-      activeJobProgress.message = 'No libraries found to backfill';
+      activeJobProgress.message = 'No libraries with valid items found to backfill';
       activeJobProgress.completedAt = new Date().toISOString();
       await publishProgress();
       activeJobProgress = null;
@@ -1360,7 +1527,7 @@ async function processBackfillLibrarySnapshotsJob(
         skipped: 0,
         errors: 0,
         durationMs: Date.now() - startTime,
-        message: 'No libraries found to backfill',
+        message: 'No libraries with valid items found to backfill',
       };
     }
 
@@ -1368,29 +1535,61 @@ async function processBackfillLibrarySnapshotsJob(
     activeJobProgress.message = `Processing ${libraries.length} libraries...`;
     await publishProgress();
 
+    // Extend locks before starting the long processing loop
+    await extendJobLock(job);
+    await extendHeavyOpsLock(job.id!);
+
     let totalProcessed = 0;
     let totalSnapshotsCreated = 0;
     let totalErrors = 0;
 
     for (const lib of libraries) {
       try {
-        // Insert daily snapshots for this library using window functions
-        // This reconstructs historical state from item creation dates
-        const result = await db.execute(sql`
-          INSERT INTO library_snapshots (
-            server_id, library_id, snapshot_time,
-            item_count, total_size,
-            movie_count, episode_count, season_count, show_count, music_count,
-            count_4k, count_1080p, count_720p, count_sd,
-            hevc_count, h264_count, av1_count,
-            enrichment_pending, enrichment_complete
+        // Calculate date range for this library
+        const libStartDate = new Date(lib.start_date);
+        const libEndDate = new Date(lib.end_date);
+        const libStartStr = lib.start_date;
+        const libEndStr = libEndDate.toISOString().split('T')[0];
+        let librarySnapshotsCreated = 0;
+
+        // Extend locks before the pre-computation phase
+        await extendJobLock(job);
+        await extendHeavyOpsLock(job.id!);
+
+        // PHASE 1: Pre-compute cumulative data ONCE for the entire library
+        // Drop and recreate temp table for each library (Drizzle auto-commits each statement,
+        // so ON COMMIT DROP doesn't work across multiple libraries)
+        await db.execute(sql`DROP TABLE IF EXISTS backfill_cumulative`);
+        await db.execute(sql`
+          CREATE TEMP TABLE backfill_cumulative (
+            day date PRIMARY KEY,
+            item_count int,
+            total_size bigint,
+            movie_count int,
+            episode_count int,
+            season_count int,
+            show_count int,
+            music_count int,
+            count_4k int,
+            count_1080p int,
+            count_720p int,
+            count_sd int,
+            hevc_count int,
+            h264_count int,
+            av1_count int
           )
+        `);
+
+        // Single scan of library_items + single window function pass
+        // This replaces the O(n²) approach where each batch rescanned the entire history
+        await db.execute(sql`
+          INSERT INTO backfill_cumulative
           WITH daily_additions AS (
-            -- Get per-day additions with all metrics
+            -- Single scan: Get per-day additions with all metrics for entire library
             SELECT
               DATE(created_at) AS day,
               COUNT(*) AS items,
-              COALESCE(SUM(file_size), 0) AS size,
+              SUM(file_size) AS size,
               COUNT(*) FILTER (WHERE media_type = 'movie') AS movies,
               COUNT(*) FILTER (WHERE media_type = 'episode') AS episodes,
               COUNT(*) FILTER (WHERE media_type = 'season') AS seasons,
@@ -1408,15 +1607,18 @@ async function processBackfillLibrarySnapshotsJob(
             FROM library_items
             WHERE server_id = ${lib.server_id}::uuid
               AND library_id = ${lib.library_id}
+              AND ${VALID_LIBRARY_ITEM_CONDITION}
             GROUP BY DATE(created_at)
           ),
-          date_series AS (
+          date_range AS (
+            -- Generate complete date series from first item to today
             SELECT d::date AS day FROM generate_series(
-              ${lib.start_date}::date, ${lib.end_date}::date, '1 day'
+              ${libStartStr}::date, ${libEndStr}::date, '1 day'
             ) d
           ),
           filled AS (
-            SELECT ds.day,
+            -- Fill in zeros for days with no additions
+            SELECT dr.day,
               COALESCE(da.items, 0) AS items, COALESCE(da.size, 0) AS size,
               COALESCE(da.movies, 0) AS movies, COALESCE(da.episodes, 0) AS episodes,
               COALESCE(da.seasons, 0) AS seasons, COALESCE(da.shows, 0) AS shows,
@@ -1425,13 +1627,13 @@ async function processBackfillLibrarySnapshotsJob(
               COALESCE(da.c720p, 0) AS c720p, COALESCE(da.csd, 0) AS csd,
               COALESCE(da.hevc, 0) AS hevc, COALESCE(da.h264, 0) AS h264,
               COALESCE(da.av1, 0) AS av1
-            FROM date_series ds
-            LEFT JOIN daily_additions da ON da.day = ds.day
+            FROM date_range dr
+            LEFT JOIN daily_additions da ON da.day = dr.day
           ),
           cumulative AS (
+            -- Single window function pass over entire date range
             SELECT
               f.day,
-              -- Cumulative counts using window functions
               SUM(items) OVER w AS item_count,
               SUM(size) OVER w AS total_size,
               SUM(movies) OVER w AS movie_count,
@@ -1450,82 +1652,175 @@ async function processBackfillLibrarySnapshotsJob(
             WINDOW w AS (ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
           )
           SELECT
-            ${lib.server_id}::uuid,
-            ${lib.library_id},
-            (c.day + INTERVAL '23 hours 59 minutes 59 seconds')::timestamptz,
-            c.item_count::int,
-            c.total_size::bigint,
-            c.movie_count::int,
-            c.episode_count::int,
-            c.season_count::int,
-            c.show_count::int,
-            c.music_count::int,
-            c.count_4k::int,
-            c.count_1080p::int,
-            c.count_720p::int,
-            c.count_sd::int,
-            c.hevc_count::int,
-            c.h264_count::int,
-            c.av1_count::int,
-            0,  -- enrichment_pending: all historical items already enriched
-            c.item_count::int  -- enrichment_complete
-          FROM cumulative c
-          -- Skip days that already have snapshots (idempotent)
-          WHERE NOT EXISTS (
-            SELECT 1 FROM library_snapshots ls
-            WHERE ls.server_id = ${lib.server_id}::uuid
-              AND ls.library_id = ${lib.library_id}
-              AND DATE(ls.snapshot_time) = c.day
-          )
+            day,
+            item_count::int,
+            total_size::bigint,
+            movie_count::int,
+            episode_count::int,
+            season_count::int,
+            show_count::int,
+            music_count::int,
+            count_4k::int,
+            count_1080p::int,
+            count_720p::int,
+            count_sd::int,
+            hevc_count::int,
+            h264_count::int,
+            av1_count::int
+          FROM cumulative
+          -- Only include days with actual content (prevents empty leading snapshots)
+          WHERE item_count > 0 AND total_size > 0
         `);
 
-        const snapshotsCreated = Number(result.rowCount ?? 0);
-        totalSnapshotsCreated += snapshotsCreated;
+        // Extend locks after pre-computation
+        await extendJobLock(job);
+        await extendHeavyOpsLock(job.id!);
+
+        // Batch INSERT from pre-computed temp table
+        // Each batch is now a simple SELECT from the temp table
+        let batchStart = libStartDate;
+        while (batchStart <= libEndDate) {
+          const batchEnd = new Date(batchStart);
+          batchEnd.setDate(batchEnd.getDate() + BATCH_SIZE_DAYS - 1);
+          if (batchEnd > libEndDate) {
+            batchEnd.setTime(libEndDate.getTime());
+          }
+
+          const batchStartStr = batchStart.toISOString().split('T')[0];
+          const batchEndStr = batchEnd.toISOString().split('T')[0];
+
+          // Extend locks before each batch INSERT
+          await extendJobLock(job);
+          await extendHeavyOpsLock(job.id!);
+
+          // Simple INSERT from pre-computed data
+          const result = await db.execute(sql`
+            INSERT INTO library_snapshots (
+              server_id, library_id, snapshot_time,
+              item_count, total_size,
+              movie_count, episode_count, season_count, show_count, music_count,
+              count_4k, count_1080p, count_720p, count_sd,
+              hevc_count, h264_count, av1_count,
+              enrichment_pending, enrichment_complete
+            )
+            SELECT
+              ${lib.server_id}::uuid,
+              ${lib.library_id},
+              (bc.day + INTERVAL '23 hours 59 minutes 59 seconds')::timestamptz,
+              bc.item_count,
+              bc.total_size,
+              bc.movie_count,
+              bc.episode_count,
+              bc.season_count,
+              bc.show_count,
+              bc.music_count,
+              bc.count_4k,
+              bc.count_1080p,
+              bc.count_720p,
+              bc.count_sd,
+              bc.hevc_count,
+              bc.h264_count,
+              bc.av1_count,
+              0,  -- enrichment_pending: all historical items already enriched
+              bc.item_count  -- enrichment_complete
+            FROM backfill_cumulative bc
+            WHERE bc.day >= ${batchStartStr}::date
+              AND bc.day <= ${batchEndStr}::date
+              -- Skip days that already have snapshots (idempotent)
+              AND NOT EXISTS (
+                SELECT 1 FROM library_snapshots ls
+                WHERE ls.server_id = ${lib.server_id}::uuid
+                  AND ls.library_id = ${lib.library_id}
+                  AND DATE(ls.snapshot_time) = bc.day
+              )
+          `);
+
+          librarySnapshotsCreated += Number(result.rowCount ?? 0);
+
+          // Extend locks after each batch
+          await extendJobLock(job);
+          await extendHeavyOpsLock(job.id!);
+
+          // Move to next batch
+          batchStart = new Date(batchEnd);
+          batchStart.setDate(batchStart.getDate() + 1);
+        }
+
+        totalSnapshotsCreated += librarySnapshotsCreated;
         totalProcessed++;
 
-        activeJobProgress.processedRecords = totalProcessed;
-        activeJobProgress.updatedRecords = totalSnapshotsCreated;
-        activeJobProgress.message = `Processed ${totalProcessed} of ${libraries.length} libraries (${totalSnapshotsCreated} snapshots created)...`;
+        // Null check: activeJobProgress can be null if job stalled and retry completed
+        if (activeJobProgress) {
+          activeJobProgress.processedRecords = totalProcessed;
+          activeJobProgress.updatedRecords = totalSnapshotsCreated;
+          activeJobProgress.message = `Processed ${totalProcessed} of ${libraries.length} libraries (${totalSnapshotsCreated} snapshots created)...`;
+        }
 
         const percent = Math.round((totalProcessed / libraries.length) * 100);
         await job.updateProgress(percent);
         await publishProgress();
 
-        // Extend lock to prevent stalled job detection
-        try {
-          await job.extendLock(job.token ?? '', 10 * 60 * 1000);
-        } catch {
-          console.warn(`[Maintenance] Failed to extend lock for job ${job.id}`);
-        }
+        // Extend locks after each library as well
+        await extendJobLock(job);
+        await extendHeavyOpsLock(job.id!);
       } catch (error) {
         console.error(
           `[Maintenance] Error processing library ${lib.server_id}/${lib.library_id}:`,
           error
         );
         totalErrors++;
-        activeJobProgress.errorRecords = totalErrors;
+        // Null check: activeJobProgress can be null if job stalled and retry completed
+        if (activeJobProgress) {
+          activeJobProgress.errorRecords = totalErrors;
+        }
       }
     }
 
-    // Clean up empty snapshots (from bad dates like 1969/1970 or gaps before real data)
-    // Note: We only delete snapshots with no items in any category.
-    // Snapshots with items but total_size=0 are kept (items may lack file_size metadata).
-    // See snapshotValidation.ts for the centralized definition of invalid snapshots.
-    activeJobProgress.message = 'Cleaning up empty snapshots...';
+    // Clean up invalid snapshots in batches to avoid lock exhaustion
+    // See snapshotValidation.ts for the definition: snapshots need both items AND size
+    // Note: With the VALID_LIBRARY_ITEM_CONDITION filter, this should rarely find anything
+    if (activeJobProgress) {
+      activeJobProgress.message = 'Cleaning up invalid snapshots...';
+    }
     await publishProgress();
 
-    const cleanupResult = await db.execute(sql`
-      DELETE FROM library_snapshots
-      WHERE ${INVALID_SNAPSHOT_CONDITION}
-    `);
-    const cleanedUp = Number(cleanupResult.rowCount ?? 0);
-    if (cleanedUp > 0) {
-      console.log(`[Maintenance] Cleaned up ${cleanedUp} empty snapshots`);
+    let totalCleanedUp = 0;
+    const CLEANUP_BATCH_SIZE = 1000;
+
+    try {
+      let cleanupBatchCount: number;
+      do {
+        const cleanupResult = await db.execute(sql`
+          DELETE FROM library_snapshots
+          WHERE id IN (
+            SELECT id FROM library_snapshots
+            WHERE ${INVALID_SNAPSHOT_CONDITION}
+            LIMIT ${CLEANUP_BATCH_SIZE}
+          )
+        `);
+        cleanupBatchCount = Number(cleanupResult.rowCount ?? 0);
+        totalCleanedUp += cleanupBatchCount;
+
+        if (cleanupBatchCount > 0 && activeJobProgress) {
+          activeJobProgress.skippedRecords = totalCleanedUp;
+          await publishProgress();
+        }
+      } while (cleanupBatchCount === CLEANUP_BATCH_SIZE);
+
+      if (totalCleanedUp > 0) {
+        console.log(`[Maintenance] Cleaned up ${totalCleanedUp} invalid snapshots`);
+      }
+    } catch (error) {
+      // Don't fail the entire job if cleanup fails - the backfill succeeded
+      // and cleanup can be retried on the next run
+      console.error('[Maintenance] Error during snapshot cleanup:', error);
     }
 
     // Refresh the continuous aggregate to include backfilled data
-    activeJobProgress.message = 'Refreshing library_stats_daily continuous aggregate...';
-    await publishProgress();
+    if (activeJobProgress) {
+      activeJobProgress.message = 'Refreshing library_stats_daily continuous aggregate...';
+      await publishProgress();
+    }
 
     // Get the earliest snapshot date to refresh from
     const earliestResult = await db.execute(sql`
@@ -1537,15 +1832,34 @@ async function processBackfillLibrarySnapshotsJob(
       await db.execute(sql`
         CALL refresh_continuous_aggregate('library_stats_daily', ${earliestDate}::date, NOW()::date + INTERVAL '1 day')
       `);
+
+      // Verify the refresh succeeded by checking aggregate has data
+      const verifyResult = await db.execute(sql`
+        SELECT COUNT(*)::int as count FROM library_stats_daily
+        WHERE day >= ${earliestDate}::date
+      `);
+      const aggregateCount = (verifyResult.rows[0] as { count: number })?.count ?? 0;
+
+      if (aggregateCount === 0 && totalSnapshotsCreated > 0) {
+        console.warn(
+          `[Maintenance] Aggregate refresh may have failed - created ${totalSnapshotsCreated} snapshots but aggregate has no data from ${earliestDate}`
+        );
+      } else {
+        console.log(
+          `[Maintenance] Aggregate refresh verified - ${aggregateCount} days of data from ${earliestDate}`
+        );
+      }
     }
 
     const durationMs = Date.now() - startTime;
-    activeJobProgress.status = 'complete';
-    activeJobProgress.processedRecords = totalProcessed;
-    activeJobProgress.skippedRecords = cleanedUp;
-    activeJobProgress.message = `Completed! Created ${totalSnapshotsCreated.toLocaleString()} snapshots for ${totalProcessed} libraries${cleanedUp > 0 ? `, cleaned up ${cleanedUp} empty` : ''} in ${Math.round(durationMs / 1000)}s`;
-    activeJobProgress.completedAt = new Date().toISOString();
-    await publishProgress();
+    if (activeJobProgress) {
+      activeJobProgress.status = 'complete';
+      activeJobProgress.processedRecords = totalProcessed;
+      activeJobProgress.skippedRecords = totalCleanedUp;
+      activeJobProgress.message = `Completed! Created ${totalSnapshotsCreated.toLocaleString()} snapshots for ${totalProcessed} libraries${totalCleanedUp > 0 ? `, cleaned up ${totalCleanedUp} invalid` : ''} in ${Math.round(durationMs / 1000)}s`;
+      activeJobProgress.completedAt = new Date().toISOString();
+      await publishProgress();
+    }
 
     activeJobProgress = null;
 
@@ -1554,10 +1868,10 @@ async function processBackfillLibrarySnapshotsJob(
       type: 'backfill_library_snapshots',
       processed: totalProcessed,
       updated: totalSnapshotsCreated,
-      skipped: cleanedUp,
+      skipped: totalCleanedUp,
       errors: totalErrors,
       durationMs,
-      message: `Created ${totalSnapshotsCreated.toLocaleString()} snapshots for ${totalProcessed} libraries${cleanedUp > 0 ? `, cleaned up ${cleanedUp} empty` : ''}`,
+      message: `Created ${totalSnapshotsCreated.toLocaleString()} snapshots for ${totalProcessed} libraries${totalCleanedUp > 0 ? `, cleaned up ${totalCleanedUp} invalid` : ''}`,
     };
   } catch (error) {
     if (activeJobProgress) {
@@ -1571,10 +1885,331 @@ async function processBackfillLibrarySnapshotsJob(
 }
 
 /**
- * Get current job progress (if any)
+ * Cleanup old TimescaleDB chunks in batches
+ *
+ * Drops old chunks from library_snapshots hypertable that are beyond the retention period.
+ * Uses batched approach to avoid exhausting PostgreSQL's lock table.
+ *
+ */
+async function processCleanupOldChunksJob(
+  job: Job<MaintenanceJobData>
+): Promise<MaintenanceJobResult> {
+  const startTime = Date.now();
+  const pubSubService = getPubSubService();
+
+  // 90 days retention for raw snapshots - matches TimescaleDB automatic retention policy.
+  // Aggregates (library_stats_daily) preserve summarized history indefinitely.
+  const RETENTION_DAYS = 90;
+  // Drop chunks in small batches to avoid lock exhaustion
+  const BATCH_INTERVAL_DAYS = 30;
+
+  // Initialize progress
+  activeJobProgress = {
+    type: 'cleanup_old_chunks',
+    status: 'running',
+    totalRecords: 0,
+    processedRecords: 0,
+    updatedRecords: 0,
+    skippedRecords: 0,
+    errorRecords: 0,
+    message: 'Analyzing chunks to clean up...',
+    startedAt: new Date().toISOString(),
+  };
+
+  const publishProgress = async () => {
+    if (pubSubService && activeJobProgress) {
+      await pubSubService.publish(WS_EVENTS.MAINTENANCE_PROGRESS, activeJobProgress);
+    }
+  };
+
+  try {
+    await publishProgress();
+
+    // Get count of chunks older than retention period
+    const countResult = await db.execute(sql`
+      SELECT COUNT(*) as count
+      FROM timescaledb_information.chunks
+      WHERE hypertable_name = 'library_snapshots'
+        AND range_end < NOW() - INTERVAL '90 days'
+    `);
+
+    const totalChunks = Number((countResult.rows[0] as { count: string })?.count ?? 0);
+
+    if (totalChunks === 0) {
+      activeJobProgress.status = 'complete';
+      activeJobProgress.message = 'No old chunks to clean up';
+      activeJobProgress.completedAt = new Date().toISOString();
+      await publishProgress();
+      activeJobProgress = null;
+
+      return {
+        success: true,
+        type: 'cleanup_old_chunks',
+        processed: 0,
+        updated: 0,
+        skipped: 0,
+        errors: 0,
+        durationMs: Date.now() - startTime,
+        message: 'No old chunks to clean up',
+      };
+    }
+
+    activeJobProgress.totalRecords = totalChunks;
+    activeJobProgress.message = `Found ${totalChunks} chunks to clean up...`;
+    await publishProgress();
+
+    // Calculate the cutoff date (retention period from now)
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
+
+    // Get the oldest chunk date
+    const oldestResult = await db.execute(sql`
+      SELECT MIN(range_start)::date as oldest
+      FROM timescaledb_information.chunks
+      WHERE hypertable_name = 'library_snapshots'
+    `);
+    const oldestDate = new Date((oldestResult.rows[0] as { oldest: string })?.oldest ?? new Date());
+
+    // IMPORTANT: Refresh the aggregate BEFORE dropping chunks to ensure any
+    // un-aggregated data is materialized. Prevents data loss if backfill's
+    // refresh failed or data was inserted outside normal flow.
+    activeJobProgress.message = 'Refreshing aggregate before cleanup...';
+    await publishProgress();
+
+    try {
+      await db.execute(sql`
+        CALL refresh_continuous_aggregate(
+          'library_stats_daily',
+          ${oldestDate.toISOString()}::date,
+          ${cutoffDate.toISOString()}::date
+        )
+      `);
+      console.log(
+        `[Maintenance] Refreshed aggregate for ${oldestDate.toISOString().split('T')[0]} to ${cutoffDate.toISOString().split('T')[0]} before cleanup`
+      );
+    } catch (refreshError) {
+      // Log but continue - the aggregate may already be up-to-date
+      console.warn('[Maintenance] Failed to refresh aggregate before cleanup:', refreshError);
+    }
+
+    activeJobProgress.message = `Dropping ${totalChunks} old chunks...`;
+    await publishProgress();
+
+    let totalDropped = 0;
+    let totalErrors = 0;
+    let currentDate = new Date(oldestDate);
+
+    // Process in batches by date range
+    while (currentDate < cutoffDate) {
+      const batchEnd = new Date(currentDate);
+      batchEnd.setDate(batchEnd.getDate() + BATCH_INTERVAL_DAYS);
+
+      // Don't go past the cutoff
+      if (batchEnd > cutoffDate) {
+        batchEnd.setTime(cutoffDate.getTime());
+      }
+
+      try {
+        // Drop chunks in this date range
+        const dropResult = await db.execute(sql`
+          SELECT drop_chunks(
+            'library_snapshots',
+            older_than => ${batchEnd.toISOString()}::timestamptz,
+            newer_than => ${currentDate.toISOString()}::timestamptz
+          )
+        `);
+
+        // Count dropped chunks from result
+        const droppedCount = dropResult.rowCount ?? 0;
+        totalDropped += droppedCount;
+
+        activeJobProgress.processedRecords = totalDropped;
+        activeJobProgress.updatedRecords = totalDropped;
+        activeJobProgress.message = `Dropped ${totalDropped} of ~${totalChunks} chunks (processing ${currentDate.toISOString().split('T')[0]} to ${batchEnd.toISOString().split('T')[0]})...`;
+
+        const percent = Math.min(100, Math.round((totalDropped / totalChunks) * 100));
+        await job.updateProgress(percent);
+        await publishProgress();
+      } catch (error) {
+        console.error(
+          `[Maintenance] Error dropping chunks for ${currentDate.toISOString()} to ${batchEnd.toISOString()}:`,
+          error
+        );
+        totalErrors++;
+        activeJobProgress.errorRecords = totalErrors;
+
+        // If we get lock errors, try smaller batches or abort
+        if (error instanceof Error && error.message.includes('shared memory')) {
+          activeJobProgress.message = `Lock exhaustion at ${currentDate.toISOString().split('T')[0]}. Try increasing max_locks_per_transaction.`;
+          break;
+        }
+      }
+
+      // Extend locks after each batch - fails fast if lock is lost
+      await extendJobLock(job);
+      await extendHeavyOpsLock(job.id!);
+
+      // Move to next batch
+      currentDate = new Date(batchEnd);
+
+      // Small delay between batches to let other operations through
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const durationMs = Date.now() - startTime;
+    activeJobProgress.status = totalErrors > 0 && totalDropped === 0 ? 'error' : 'complete';
+    activeJobProgress.message = `Completed! Dropped ${totalDropped} chunks in ${Math.round(durationMs / 1000)}s${totalErrors > 0 ? ` (${totalErrors} errors)` : ''}`;
+    activeJobProgress.completedAt = new Date().toISOString();
+    await publishProgress();
+
+    activeJobProgress = null;
+
+    return {
+      success: totalErrors === 0 || totalDropped > 0,
+      type: 'cleanup_old_chunks',
+      processed: totalChunks,
+      updated: totalDropped,
+      skipped: 0,
+      errors: totalErrors,
+      durationMs,
+      message: `Dropped ${totalDropped} old chunks${totalErrors > 0 ? ` with ${totalErrors} errors` : ''}`,
+    };
+  } catch (error) {
+    if (activeJobProgress) {
+      activeJobProgress.status = 'error';
+      activeJobProgress.message = error instanceof Error ? error.message : 'Unknown error';
+      await publishProgress();
+      activeJobProgress = null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Safely rebuild all aggregates using batched processing.
+ *
+ * This is the safe alternative to fullRefresh: true for full history rebuilds.
+ * Features:
+ * - Processes one aggregate at a time
+ * - Each aggregate is processed in 30-day batches
+ * - 2-second delay between batches prevents lock exhaustion
+ * - Progress tracking via WebSocket
+ */
+async function processFullAggregateRebuildJob(
+  job: Job<MaintenanceJobData>
+): Promise<MaintenanceJobResult> {
+  const startTime = Date.now();
+  const pubSubService = getPubSubService();
+
+  // Initialize progress
+  activeJobProgress = {
+    type: 'full_aggregate_rebuild',
+    status: 'running',
+    totalRecords: 0,
+    processedRecords: 0,
+    updatedRecords: 0,
+    skippedRecords: 0,
+    errorRecords: 0,
+    message: 'Starting aggregate rebuild...',
+    startedAt: new Date().toISOString(),
+  };
+
+  const publishProgress = async () => {
+    if (activeJobProgress && pubSubService) {
+      await pubSubService.publish(WS_EVENTS.MAINTENANCE_PROGRESS, activeJobProgress);
+    }
+  };
+
+  try {
+    await publishProgress();
+
+    await safeFullRefreshAllAggregates({
+      batchDays: 30,
+      delayBetweenBatches: 2000, // 2 second delay to prevent lock exhaustion
+      onProgress: (progress: AggregateRefreshProgress) => {
+        if (activeJobProgress) {
+          activeJobProgress.totalRecords = progress.totalAggregates;
+          activeJobProgress.processedRecords = progress.currentAggregateIndex;
+          activeJobProgress.message = `Rebuilding ${progress.aggregate}: ${progress.percentComplete}%`;
+          void publishProgress();
+        }
+        // Also update job progress for BullMQ UI
+        void job.updateProgress(progress.percentComplete);
+      },
+    });
+
+    const durationMs = Date.now() - startTime;
+
+    // Capture final counts before clearing progress
+    const finalProcessed = activeJobProgress?.totalRecords ?? 4;
+
+    // Update progress to complete
+    if (activeJobProgress) {
+      activeJobProgress.status = 'complete';
+      activeJobProgress.message = 'Aggregate rebuild complete';
+      activeJobProgress.completedAt = new Date().toISOString();
+    }
+    await publishProgress();
+
+    activeJobProgress = null;
+
+    return {
+      success: true,
+      type: 'full_aggregate_rebuild',
+      processed: finalProcessed,
+      updated: finalProcessed,
+      skipped: 0,
+      errors: 0,
+      durationMs,
+      message: 'Successfully rebuilt all aggregates',
+    };
+  } catch (error) {
+    if (activeJobProgress) {
+      activeJobProgress.status = 'error';
+      activeJobProgress.message = error instanceof Error ? error.message : 'Unknown error';
+      await publishProgress();
+      activeJobProgress = null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Get current job progress (if any) - from in-memory cache
  */
 export function getMaintenanceProgress(): MaintenanceJobProgress | null {
   return activeJobProgress;
+}
+
+/**
+ * Get all active/pending maintenance jobs from BullMQ
+ * Used to show jobs in Running Tasks even before worker sets activeJobProgress
+ */
+export async function getAllActiveMaintenanceJobs(): Promise<
+  Array<{
+    jobId: string;
+    type: MaintenanceJobType;
+    state: string;
+    createdAt: number;
+  }>
+> {
+  if (!maintenanceQueue) {
+    return [];
+  }
+
+  const jobs = await maintenanceQueue.getJobs(['active', 'waiting', 'delayed']);
+
+  return Promise.all(
+    jobs.map(async (job) => {
+      const state = await job.getState();
+      return {
+        jobId: job.id ?? 'unknown',
+        type: job.data.type,
+        state,
+        createdAt: job.timestamp ?? Date.now(),
+      };
+    })
+  );
 }
 
 /**
@@ -1648,6 +2283,74 @@ export async function getMaintenanceJobStatus(jobId: string): Promise<{
     createdAt: job.timestamp,
     finishedAt: job.finishedOn,
   };
+}
+
+/**
+ * Clear all stuck/active maintenance jobs.
+ * Use this to recover from a crash where jobs are left in active state.
+ */
+export async function clearStuckMaintenanceJobs(): Promise<{ cleared: number }> {
+  if (!maintenanceQueue) {
+    return { cleared: 0 };
+  }
+
+  let cleared = 0;
+
+  // Handle active jobs - must move to failed first (can't remove active jobs directly)
+  const activeJobs = await maintenanceQueue.getJobs(['active']);
+  for (const job of activeJobs) {
+    try {
+      await job.moveToFailed(new Error('Manually cleared by admin'), 'manual-clear');
+      cleared++;
+    } catch {
+      // Try remove as fallback
+      try {
+        await job.remove();
+        cleared++;
+      } catch {
+        // Job might have already been handled
+      }
+    }
+  }
+
+  // Handle waiting/delayed jobs - can remove directly
+  const pendingJobs = await maintenanceQueue.getJobs(['waiting', 'delayed']);
+  for (const job of pendingJobs) {
+    try {
+      await job.remove();
+      cleared++;
+    } catch {
+      // Job might have already been removed
+    }
+  }
+
+  // Also clear in-memory progress
+  activeJobProgress = null;
+
+  return { cleared };
+}
+
+/**
+ * Obliterate the maintenance queue - removes ALL jobs (nuclear option)
+ *
+ * This completely wipes the queue, including completed and failed jobs.
+ * Use when the queue is in an unrecoverable state.
+ */
+export async function obliterateMaintenanceQueue(): Promise<{ success: boolean }> {
+  if (!maintenanceQueue) {
+    return { success: false };
+  }
+
+  try {
+    // Obliterate removes all jobs and clears the queue completely
+    await maintenanceQueue.obliterate({ force: true });
+    activeJobProgress = null;
+    console.log('[Maintenance] Queue obliterated');
+    return { success: true };
+  } catch (error) {
+    console.error('[Maintenance] Failed to obliterate queue:', error);
+    return { success: false };
+  }
 }
 
 /**

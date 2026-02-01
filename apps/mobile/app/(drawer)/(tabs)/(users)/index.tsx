@@ -14,10 +14,11 @@ import {
   Pressable,
   ActivityIndicator,
   TextInput,
+  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
+import { DrawerActions, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { formatDistanceToNow } from 'date-fns';
 import { api } from '@/lib/api';
@@ -27,7 +28,7 @@ import { Text } from '@/components/ui/text';
 import { Card } from '@/components/ui/card';
 import { UserAvatar } from '@/components/ui/user-avatar';
 import { cn } from '@/lib/utils';
-import { colors, spacing, borderRadius } from '@/lib/theme';
+import { colors, spacing, borderRadius, ACCENT_COLOR } from '@/lib/theme';
 import type { ServerUserWithIdentity } from '@tracearr/shared';
 
 const PAGE_SIZE = 50;
@@ -112,6 +113,7 @@ function UserCard({
 
 export default function UsersScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { selectedServerId } = useMediaServer();
   const { isTablet, select } = useResponsive();
   const [searchQuery, setSearchQuery] = useState('');
@@ -136,6 +138,7 @@ export default function UsersScreen() {
         }
         return undefined;
       },
+      staleTime: 1000 * 60, // 60 seconds - user list doesn't change frequently
     });
 
   // Flatten all pages into single array
@@ -160,15 +163,13 @@ export default function UsersScreen() {
   };
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: colors.background.dark }}
-      edges={['left', 'right', 'bottom']}
-    >
+    <>
       <FlatList
         data={users}
         keyExtractor={(item) => item.id}
         numColumns={numColumns}
         key={numColumns} // Force re-render when columns change
+        contentInsetAdjustmentBehavior="automatic"
         renderItem={({ item, index }) => (
           <View
             style={{
@@ -192,17 +193,12 @@ export default function UsersScreen() {
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.5}
         refreshControl={
-          <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={refetch}
-            tintColor={colors.cyan.core}
-          />
+          <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={ACCENT_COLOR} />
         }
         ListHeaderComponent={
           <View style={{ marginBottom: spacing.md }}>
             {/* Title row */}
             <View className="mb-3 flex-row items-center justify-between">
-              <Text className="text-lg font-semibold">Users</Text>
               <Text className="text-muted-foreground text-sm">
                 {searchQuery ? `${users.length} of ${total}` : total}{' '}
                 {total === 1 ? 'user' : 'users'}
@@ -249,7 +245,7 @@ export default function UsersScreen() {
         ListFooterComponent={
           isFetchingNextPage ? (
             <View className="items-center py-4">
-              <ActivityIndicator size="small" color={colors.cyan.core} />
+              <ActivityIndicator size="small" color={ACCENT_COLOR} />
             </View>
           ) : null
         }
@@ -269,6 +265,25 @@ export default function UsersScreen() {
           </View>
         }
       />
-    </SafeAreaView>
+
+      {/* iOS Native Toolbar */}
+      {Platform.OS === 'ios' && (
+        <>
+          <Stack.Toolbar placement="left">
+            <Stack.Toolbar.Button
+              icon="line.3.horizontal"
+              onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
+            />
+          </Stack.Toolbar>
+          <Stack.Toolbar placement="right">
+            <Stack.Toolbar.Menu icon="ellipsis">
+              <Stack.Toolbar.MenuAction icon="arrow.clockwise" onPress={() => refetch()}>
+                Refresh
+              </Stack.Toolbar.MenuAction>
+            </Stack.Toolbar.Menu>
+          </Stack.Toolbar>
+        </>
+      )}
+    </>
   );
 }

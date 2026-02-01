@@ -60,6 +60,8 @@ import type {
   StreamAudioDetails,
   TranscodeInfo,
   SubtitleInfo,
+  RuleConditions,
+  RuleActions,
 } from '@tracearr/shared';
 
 // Re-export for consumers of this module
@@ -259,7 +261,7 @@ export const sessions = pgTable(
       .$type<(typeof mediaTypeEnum)[number]>(),
     mediaTitle: text('media_title').notNull(),
     // Enhanced media metadata for episodes
-    grandparentTitle: varchar('grandparent_title', { length: 500 }), // Show name (for episodes)
+    grandparentTitle: text('grandparent_title'), // Show name (for episodes)
     seasonNumber: integer('season_number'), // Season number (for episodes)
     episodeNumber: integer('episode_number'), // Episode number (for episodes)
     year: integer('year'), // Release year
@@ -375,9 +377,15 @@ export const rules = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: varchar('name', { length: 100 }).notNull(),
-    type: varchar('type', { length: 50 }).notNull().$type<(typeof ruleTypeEnum)[number]>(),
-    params: jsonb('params').notNull().$type<Record<string, unknown>>(),
-    // Nullable: null = global rule, set = specific server user
+    description: text('description'),
+    // Legacy columns - will be removed after migration
+    type: varchar('type', { length: 50 }).$type<(typeof ruleTypeEnum)[number]>(),
+    params: jsonb('params').$type<Record<string, unknown>>(),
+    // New V2 columns
+    conditions: jsonb('conditions').$type<RuleConditions>(),
+    actions: jsonb('actions').$type<RuleActions>(),
+    // Scope
+    serverId: uuid('server_id').references(() => servers.id, { onDelete: 'cascade' }),
     serverUserId: uuid('server_user_id').references(() => serverUsers.id, { onDelete: 'cascade' }),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -385,6 +393,7 @@ export const rules = pgTable(
   },
   (table) => [
     index('rules_active_idx').on(table.isActive),
+    index('rules_server_id_idx').on(table.serverId),
     index('rules_server_user_id_idx').on(table.serverUserId),
   ]
 );
@@ -408,7 +417,8 @@ export const violations = pgTable(
       .$type<(typeof violationSeverityEnum)[number]>(),
     // Denormalized rule type for unique constraint (rules.type copied here)
     // This enables the partial unique index without requiring a join
-    ruleType: varchar('rule_type', { length: 50 }).notNull().$type<(typeof ruleTypeEnum)[number]>(),
+    // Nullable for V2 rules which don't have a type field
+    ruleType: varchar('rule_type', { length: 50 }).$type<(typeof ruleTypeEnum)[number] | null>(),
     data: jsonb('data').notNull().$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
@@ -433,6 +443,26 @@ export const violations = pgTable(
       table.ruleId,
       table.acknowledgedAt
     ),
+  ]
+);
+
+// Rule action execution results (for V2 rules)
+export const ruleActionResults = pgTable(
+  'rule_action_results',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    violationId: uuid('violation_id').references(() => violations.id, { onDelete: 'cascade' }),
+    ruleId: uuid('rule_id').references(() => rules.id, { onDelete: 'cascade' }),
+    actionType: varchar('action_type', { length: 50 }).notNull(),
+    success: boolean('success').notNull(),
+    skipped: boolean('skipped').default(false),
+    skipReason: text('skip_reason'),
+    errorMessage: text('error_message'),
+    executedAt: timestamp('executed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_rule_action_results_violation').on(table.violationId),
+    index('idx_rule_action_results_rule').on(table.ruleId),
   ]
 );
 
@@ -718,14 +748,19 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
 }));
 
 export const rulesRelations = relations(rules, ({ one, many }) => ({
+  server: one(servers, {
+    fields: [rules.serverId],
+    references: [servers.id],
+  }),
   serverUser: one(serverUsers, {
     fields: [rules.serverUserId],
     references: [serverUsers.id],
   }),
   violations: many(violations),
+  actionResults: many(ruleActionResults),
 }));
 
-export const violationsRelations = relations(violations, ({ one }) => ({
+export const violationsRelations = relations(violations, ({ one, many }) => ({
   rule: one(rules, {
     fields: [violations.ruleId],
     references: [rules.id],
@@ -737,6 +772,18 @@ export const violationsRelations = relations(violations, ({ one }) => ({
   session: one(sessions, {
     fields: [violations.sessionId],
     references: [sessions.id],
+  }),
+  actionResults: many(ruleActionResults),
+}));
+
+export const ruleActionResultsRelations = relations(ruleActionResults, ({ one }) => ({
+  violation: one(violations, {
+    fields: [ruleActionResults.violationId],
+    references: [violations.id],
+  }),
+  rule: one(rules, {
+    fields: [ruleActionResults.ruleId],
+    references: [rules.id],
   }),
 }));
 
@@ -827,7 +874,7 @@ export const libraryItems = pgTable(
     tvdbId: integer('tvdb_id'), // TVDB ID
 
     // Media metadata
-    title: varchar('title', { length: 500 }).notNull(),
+    title: text('title').notNull(),
     mediaType: varchar('media_type', { length: 20 }).notNull(), // movie, episode, season, show, artist, album, track
     year: integer('year'),
 
@@ -844,9 +891,9 @@ export const libraryItems = pgTable(
     // Hierarchy fields for episodes and tracks (Plex-style naming)
     // For episodes: grandparent=show, parent=season, item_index=episode#, parent_index=season#
     // For tracks: grandparent=artist, parent=album, item_index=track#
-    grandparentTitle: varchar('grandparent_title', { length: 500 }),
+    grandparentTitle: text('grandparent_title'),
     grandparentRatingKey: varchar('grandparent_rating_key', { length: 255 }),
-    parentTitle: varchar('parent_title', { length: 500 }),
+    parentTitle: text('parent_title'),
     parentRatingKey: varchar('parent_rating_key', { length: 255 }),
     parentIndex: integer('parent_index'), // season number for episodes
     itemIndex: integer('item_index'), // episode number or track number

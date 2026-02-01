@@ -300,6 +300,219 @@ export const ruleIdParamSchema = z.object({
   id: uuidSchema,
 });
 
+// ============================================
+// Rules Builder V2 - Validation Schemas
+// ============================================
+
+// Operators
+export const comparisonOperatorSchema = z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']);
+export const arrayOperatorSchema = z.enum(['in', 'not_in']);
+export const stringOperatorSchema = z.enum(['contains', 'not_contains']);
+export const operatorSchema = z.union([
+  comparisonOperatorSchema,
+  arrayOperatorSchema,
+  stringOperatorSchema,
+]);
+
+// Condition fields by category
+export const sessionBehaviorFieldSchema = z.enum([
+  'concurrent_streams',
+  'active_session_distance_km',
+  'travel_speed_kmh',
+  'unique_ips_in_window',
+  'unique_devices_in_window',
+  'inactive_days',
+]);
+
+export const streamQualityFieldSchema = z.enum([
+  'source_resolution',
+  'output_resolution',
+  'is_transcoding',
+  'is_transcode_downgrade',
+  'source_bitrate_mbps',
+]);
+
+export const userAttributeFieldSchema = z.enum(['user_id', 'trust_score', 'account_age_days']);
+
+export const deviceClientFieldSchema = z.enum(['device_type', 'client_name', 'platform']);
+
+export const networkLocationFieldSchema = z.enum(['is_local_network', 'country', 'ip_in_range']);
+
+export const scopeFieldSchema = z.enum(['server_id', 'library_id', 'media_type']);
+
+export const conditionFieldSchema = z.union([
+  sessionBehaviorFieldSchema,
+  streamQualityFieldSchema,
+  userAttributeFieldSchema,
+  deviceClientFieldSchema,
+  networkLocationFieldSchema,
+  scopeFieldSchema,
+]);
+
+// Enums
+export const videoResolutionSchema = z.enum(['4K', '1080p', '720p', '480p', 'SD', 'unknown']);
+export const deviceTypeSchema = z.enum(['mobile', 'tablet', 'tv', 'desktop', 'browser', 'unknown']);
+export const platformSchema = z.enum([
+  'ios',
+  'android',
+  'windows',
+  'macos',
+  'linux',
+  'tvos',
+  'androidtv',
+  'roku',
+  'webos',
+  'tizen',
+  'unknown',
+]);
+export const mediaTypeEnumSchema = z.enum([
+  'movie',
+  'episode',
+  'track',
+  'photo',
+  'live',
+  'trailer',
+]);
+
+// Condition value
+export const conditionValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.array(z.string()),
+  z.array(z.number()),
+]);
+
+// Single condition
+export const conditionSchema = z.object({
+  field: conditionFieldSchema,
+  operator: operatorSchema,
+  value: conditionValueSchema,
+  params: z
+    .object({
+      window_hours: z.number().int().positive().optional(),
+    })
+    .optional(),
+});
+
+// Condition group (OR logic)
+export const conditionGroupSchema = z.object({
+  conditions: z.array(conditionSchema).min(1),
+});
+
+// Rule conditions (AND logic between groups)
+export const ruleConditionsSchema = z.object({
+  groups: z.array(conditionGroupSchema).min(1),
+});
+
+// Action types
+export const actionTypeSchema = z.enum([
+  'create_violation',
+  'log_only',
+  'notify',
+  'adjust_trust',
+  'set_trust',
+  'reset_trust',
+  'kill_stream',
+  'message_client',
+]);
+
+export const notificationChannelV2Schema = z.enum(['push', 'discord', 'email', 'webhook']);
+
+// Individual action schemas
+export const createViolationActionSchema = z.object({
+  type: z.literal('create_violation'),
+  severity: z.enum(['low', 'warning', 'high']),
+  cooldown_minutes: z.number().int().positive().optional(),
+});
+
+export const logOnlyActionSchema = z.object({
+  type: z.literal('log_only'),
+  message: z.string().max(500).optional(),
+});
+
+export const notifyActionSchema = z.object({
+  type: z.literal('notify'),
+  channels: z.array(notificationChannelV2Schema).min(1),
+  cooldown_minutes: z.number().int().positive().optional(),
+});
+
+export const adjustTrustActionSchema = z.object({
+  type: z.literal('adjust_trust'),
+  amount: z.number().int().min(-100).max(100),
+});
+
+export const setTrustActionSchema = z.object({
+  type: z.literal('set_trust'),
+  value: z.number().int().min(0).max(100),
+});
+
+export const resetTrustActionSchema = z.object({
+  type: z.literal('reset_trust'),
+});
+
+export const killStreamActionSchema = z.object({
+  type: z.literal('kill_stream'),
+  delay_seconds: z.number().int().min(0).max(300).optional(),
+  require_confirmation: z.boolean().optional(),
+  cooldown_minutes: z.number().int().positive().optional(),
+});
+
+export const messageClientActionSchema = z.object({
+  type: z.literal('message_client'),
+  message: z.string().min(1).max(500),
+});
+
+// Union of all actions
+export const actionSchema = z.discriminatedUnion('type', [
+  createViolationActionSchema,
+  logOnlyActionSchema,
+  notifyActionSchema,
+  adjustTrustActionSchema,
+  setTrustActionSchema,
+  resetTrustActionSchema,
+  killStreamActionSchema,
+  messageClientActionSchema,
+]);
+
+// Rule actions container
+export const ruleActionsSchema = z.object({
+  actions: z.array(actionSchema).min(1),
+});
+
+// Create rule V2 schema
+export const createRuleV2Schema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).nullable().optional(),
+  serverId: uuidSchema.nullable().optional(),
+  isActive: z.boolean().default(true),
+  conditions: ruleConditionsSchema,
+  actions: ruleActionsSchema,
+});
+
+// Update rule V2 schema
+export const updateRuleV2Schema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(500).nullable().optional(),
+  isActive: z.boolean().optional(),
+  conditions: ruleConditionsSchema.optional(),
+  actions: ruleActionsSchema.optional(),
+});
+
+// Bulk operations schemas
+export const bulkUpdateRulesSchema = z.object({
+  ids: z.array(uuidSchema).min(1, 'At least one rule ID is required'),
+  isActive: z.boolean(),
+});
+
+export const bulkDeleteRulesSchema = z.object({
+  ids: z.array(uuidSchema).min(1, 'At least one rule ID is required'),
+});
+
+export const bulkMigrateRulesSchema = z.object({
+  ids: z.array(uuidSchema).optional(),
+});
+
 // ============================================================================
 // Violation Schemas
 // ============================================================================
@@ -782,6 +995,45 @@ export type HistoryQueryInput = z.infer<typeof historyQuerySchema>;
 export type HistoryAggregatesQueryInput = z.infer<typeof historyAggregatesQuerySchema>;
 export type CreateRuleInput = z.infer<typeof createRuleSchema>;
 export type UpdateRuleInput = z.infer<typeof updateRuleSchema>;
+
+// Rules Builder V2 types
+export type ComparisonOperator = z.infer<typeof comparisonOperatorSchema>;
+export type ArrayOperator = z.infer<typeof arrayOperatorSchema>;
+export type StringOperator = z.infer<typeof stringOperatorSchema>;
+export type Operator = z.infer<typeof operatorSchema>;
+export type SessionBehaviorField = z.infer<typeof sessionBehaviorFieldSchema>;
+export type StreamQualityField = z.infer<typeof streamQualityFieldSchema>;
+export type UserAttributeField = z.infer<typeof userAttributeFieldSchema>;
+export type DeviceClientField = z.infer<typeof deviceClientFieldSchema>;
+export type NetworkLocationField = z.infer<typeof networkLocationFieldSchema>;
+export type ScopeField = z.infer<typeof scopeFieldSchema>;
+export type ConditionField = z.infer<typeof conditionFieldSchema>;
+export type VideoResolution = z.infer<typeof videoResolutionSchema>;
+export type DeviceType = z.infer<typeof deviceTypeSchema>;
+export type Platform = z.infer<typeof platformSchema>;
+export type MediaTypeEnum = z.infer<typeof mediaTypeEnumSchema>;
+export type ConditionValue = z.infer<typeof conditionValueSchema>;
+export type Condition = z.infer<typeof conditionSchema>;
+export type ConditionGroup = z.infer<typeof conditionGroupSchema>;
+export type RuleConditions = z.infer<typeof ruleConditionsSchema>;
+export type ActionType = z.infer<typeof actionTypeSchema>;
+export type NotificationChannelV2 = z.infer<typeof notificationChannelV2Schema>;
+export type CreateViolationAction = z.infer<typeof createViolationActionSchema>;
+export type LogOnlyAction = z.infer<typeof logOnlyActionSchema>;
+export type NotifyAction = z.infer<typeof notifyActionSchema>;
+export type AdjustTrustAction = z.infer<typeof adjustTrustActionSchema>;
+export type SetTrustAction = z.infer<typeof setTrustActionSchema>;
+export type ResetTrustAction = z.infer<typeof resetTrustActionSchema>;
+export type KillStreamAction = z.infer<typeof killStreamActionSchema>;
+export type MessageClientAction = z.infer<typeof messageClientActionSchema>;
+export type Action = z.infer<typeof actionSchema>;
+export type RuleActions = z.infer<typeof ruleActionsSchema>;
+export type CreateRuleV2Input = z.infer<typeof createRuleV2Schema>;
+export type UpdateRuleV2Input = z.infer<typeof updateRuleV2Schema>;
+export type BulkUpdateRulesInput = z.infer<typeof bulkUpdateRulesSchema>;
+export type BulkDeleteRulesInput = z.infer<typeof bulkDeleteRulesSchema>;
+export type BulkMigrateRulesInput = z.infer<typeof bulkMigrateRulesSchema>;
+
 export type ViolationQueryInput = z.infer<typeof violationQuerySchema>;
 export type ServerIdFilterInput = z.infer<typeof serverIdFilterSchema>;
 export type DashboardQueryInput = z.infer<typeof dashboardQuerySchema>;
