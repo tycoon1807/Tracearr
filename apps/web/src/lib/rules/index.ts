@@ -5,3 +5,4 @@
 export * from './conditionFields';
 export * from './actionDefinitions';
 export * from './ruleDisplay';
+export * from './classicRuleTemplates';

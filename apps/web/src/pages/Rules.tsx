@@ -58,6 +58,7 @@ import type {
   RulesFilterOptions,
 } from '@tracearr/shared';
 import { RuleBuilderDialog, getRuleIcon, getRuleSummary, isV2Rule } from '@/components/rules';
+import { CLASSIC_RULE_TEMPLATES, type ClassicRuleTemplate } from '@/lib/rules';
 import {
   getSpeedUnit,
   getDistanceUnit,
@@ -721,15 +722,19 @@ export function Rules() {
 
   const unitSystem = settings?.unitSystem ?? 'metric';
 
-  // V1 Classic rule dialog state
+  // V1 Classic rule dialog state (for editing legacy rules only)
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<Rule | undefined>();
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
 
+  // Template picker for creating new rules from classic templates
+  const [isTemplatePicker, setIsTemplatePicker] = useState(false);
+
   // V2 Custom rule builder dialog state
   const [isV2DialogOpen, setIsV2DialogOpen] = useState(false);
   const [editingV2Rule, setEditingV2Rule] = useState<Rule | undefined>();
+  const [selectedTemplate, setSelectedTemplate] = useState<ClassicRuleTemplate | undefined>();
   const createRuleV2 = useCreateRuleV2();
   const updateRuleV2 = useUpdateRuleV2();
   const { data: rulesFilterOptions } = useRulesFilterOptions();
@@ -813,23 +818,33 @@ export function Rules() {
     });
   };
 
-  const openCreateDialog = () => {
-    setEditingRule(undefined);
-    setIsDialogOpen(true);
-  };
-
+  // Legacy V1 rule editing (for backwards compatibility)
   const openEditDialog = (rule: Rule) => {
     setEditingRule(rule);
     setIsDialogOpen(true);
   };
 
+  // Template picker for classic rules
+  const openTemplatePicker = () => {
+    setIsTemplatePicker(true);
+  };
+
+  const handleTemplateSelect = (template: ClassicRuleTemplate) => {
+    setSelectedTemplate(template);
+    setIsTemplatePicker(false);
+    setEditingV2Rule(undefined);
+    setIsV2DialogOpen(true);
+  };
+
   // V2 Custom rule handlers
   const openV2CreateDialog = () => {
+    setSelectedTemplate(undefined);
     setEditingV2Rule(undefined);
     setIsV2DialogOpen(true);
   };
 
   const openV2EditDialog = (rule: Rule) => {
+    setSelectedTemplate(undefined);
     setEditingV2Rule(rule);
     setIsV2DialogOpen(true);
   };
@@ -887,7 +902,7 @@ export function Rules() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={openCreateDialog}>
+            <DropdownMenuItem onClick={openTemplatePicker}>
               <Settings2 className="mr-2 h-4 w-4" />
               Classic Rule
             </DropdownMenuItem>
@@ -956,7 +971,7 @@ export function Rules() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onClick={openCreateDialog}>
+                <DropdownMenuItem onClick={openTemplatePicker}>
                   <Settings2 className="mr-2 h-4 w-4" />
                   Classic Rule
                 </DropdownMenuItem>
@@ -1027,11 +1042,55 @@ export function Rules() {
         isLoading={deleteRule.isPending}
       />
 
+      {/* Template Picker Dialog */}
+      <Dialog open={isTemplatePicker} onOpenChange={setIsTemplatePicker}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Choose a Rule Template</DialogTitle>
+            <DialogDescription>
+              Select a pre-configured rule type to get started quickly.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {CLASSIC_RULE_TEMPLATES.map((template) => (
+              <button
+                key={template.type}
+                onClick={() => handleTemplateSelect(template)}
+                className="hover:bg-accent flex items-center gap-4 rounded-lg border p-4 text-left transition-colors"
+              >
+                <div className="bg-muted flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
+                  {RULE_TYPE_ICONS[template.type]}
+                </div>
+                <div>
+                  <div className="font-medium">{template.label}</div>
+                  <div className="text-muted-foreground text-sm">{template.description}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* V2 Custom Rule Builder Dialog */}
       <RuleBuilderDialog
         open={isV2DialogOpen}
-        onOpenChange={setIsV2DialogOpen}
-        rule={editingV2Rule}
+        onOpenChange={(open) => {
+          setIsV2DialogOpen(open);
+          if (!open) setSelectedTemplate(undefined);
+        }}
+        rule={
+          editingV2Rule ??
+          (selectedTemplate
+            ? {
+                id: '',
+                name: selectedTemplate.defaultName,
+                description: selectedTemplate.description,
+                isActive: true,
+                conditions: selectedTemplate.conditions,
+                actions: selectedTemplate.actions,
+              }
+            : undefined)
+        }
         onSave={handleV2Save}
         isLoading={createRuleV2.isPending || updateRuleV2.isPending}
         filterOptions={rulesFilterOptions}
