@@ -11,6 +11,7 @@ import type {
   MessageClientAction,
 } from '@tracearr/shared';
 import type { ActionExecutor, EvaluationContext } from '../types.js';
+import { resolveTargetSessions } from './targeting.js';
 
 /**
  * Result of executing an action.
@@ -301,12 +302,22 @@ const executeKillStream: ActionExecutor = async (
   context: EvaluationContext,
   action: Action
 ): Promise<void> => {
-  const { session, server } = context;
+  const { session, server, serverUser, activeSessions } = context;
   const typedAction = action as KillStreamAction;
   const delaySeconds = typedAction.delay_seconds ?? 0;
   const message = typedAction.message;
+  const target = typedAction.target ?? 'triggering';
 
-  await currentDeps.terminateSession(session.id, server.id, delaySeconds, message);
+  const sessionsToKill = resolveTargetSessions({
+    target,
+    triggeringSession: session,
+    serverUserId: serverUser.id,
+    activeSessions,
+  });
+
+  for (const targetSession of sessionsToKill) {
+    await currentDeps.terminateSession(targetSession.id, server.id, delaySeconds, message);
+  }
 };
 
 /**
@@ -316,12 +327,24 @@ const executeMessageClient: ActionExecutor = async (
   context: EvaluationContext,
   action: Action
 ): Promise<void> => {
-  const { session } = context;
+  const { session, serverUser, activeSessions } = context;
   const typedAction = action as MessageClientAction;
   const message = typedAction.message;
+  const target = typedAction.target ?? 'triggering';
 
-  if (message) {
-    await currentDeps.sendClientMessage(session.id, message);
+  if (!message) {
+    return;
+  }
+
+  const sessionsToMessage = resolveTargetSessions({
+    target,
+    triggeringSession: session,
+    serverUserId: serverUser.id,
+    activeSessions,
+  });
+
+  for (const targetSession of sessionsToMessage) {
+    await currentDeps.sendClientMessage(targetSession.id, message);
   }
 };
 

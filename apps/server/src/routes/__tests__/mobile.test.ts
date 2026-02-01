@@ -1750,6 +1750,7 @@ describe('Mobile Routes', () => {
       vi.mocked(terminateSession).mockResolvedValue({
         success: true,
         terminationLogId: randomUUID(),
+        outcome: 'terminated',
       });
 
       const response = await app.inject({
@@ -1799,6 +1800,7 @@ describe('Mobile Routes', () => {
       vi.mocked(terminateSession).mockResolvedValue({
         success: true,
         terminationLogId: randomUUID(),
+        outcome: 'terminated',
       });
 
       const response = await app.inject({
@@ -1949,6 +1951,7 @@ describe('Mobile Routes', () => {
         success: false,
         terminationLogId: randomUUID(),
         error: 'Media server connection failed',
+        outcome: 'failed',
       });
 
       const response = await app.inject({

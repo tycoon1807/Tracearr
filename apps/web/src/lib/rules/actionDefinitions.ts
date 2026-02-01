@@ -10,10 +10,19 @@ import type {
   ViolationSeverity,
   NotificationChannelV2,
   Action,
+  SessionTarget,
 } from '@tracearr/shared';
 
 // Config field types for rendering action configuration
 export type ConfigFieldType = 'number' | 'text' | 'select' | 'multi-select' | 'slider';
+
+// Option definition for select/multi-select fields
+export interface ConfigFieldOption {
+  value: string;
+  label: string;
+  /** Tooltip shown on hover */
+  tooltip?: string;
+}
 
 // Config field definition
 export interface ConfigField {
@@ -21,7 +30,7 @@ export interface ConfigField {
   label: string;
   type: ConfigFieldType;
   required?: boolean;
-  options?: { value: string; label: string }[];
+  options?: ConfigFieldOption[];
   min?: number;
   max?: number;
   step?: number;
@@ -56,6 +65,35 @@ export const NOTIFICATION_CHANNEL_OPTIONS: { value: NotificationChannelV2; label
   { value: 'discord', label: 'Discord' },
   { value: 'email', label: 'Email' },
   { value: 'webhook', label: 'Webhook' },
+];
+
+// Session target options for kill_stream and message_client actions
+export const SESSION_TARGET_OPTIONS: ConfigFieldOption[] = [
+  {
+    value: 'triggering',
+    label: 'Triggering session',
+    tooltip: 'Only the session that triggered this rule',
+  },
+  {
+    value: 'oldest',
+    label: 'Oldest session',
+    tooltip: "The user's longest-running active session",
+  },
+  {
+    value: 'newest',
+    label: 'Newest session',
+    tooltip: "The user's most recently started session",
+  },
+  {
+    value: 'all_except_one',
+    label: 'All except one (keep oldest)',
+    tooltip: 'All sessions except the oldest, bringing user down to 1 stream',
+  },
+  {
+    value: 'all_user',
+    label: 'All user sessions',
+    tooltip: 'Every active session for this user',
+  },
 ];
 
 // The main action definitions registry
@@ -207,6 +245,14 @@ export const ACTION_DEFINITIONS: Record<ActionType, ActionDefinition> = {
         description: 'Minimum time between terminations',
       },
       {
+        name: 'target',
+        label: 'Target',
+        type: 'select',
+        options: SESSION_TARGET_OPTIONS,
+        description: 'Which sessions to terminate',
+        fullWidth: true,
+      },
+      {
         name: 'message',
         label: 'Message',
         type: 'text',
@@ -225,6 +271,14 @@ export const ACTION_DEFINITIONS: Record<ActionType, ActionDefinition> = {
     color: 'default',
     hint: 'Jellyfin and Emby only. Plex only supports messages when killing a stream.',
     configFields: [
+      {
+        name: 'target',
+        label: 'Target',
+        type: 'select',
+        options: SESSION_TARGET_OPTIONS,
+        description: 'Which sessions to message',
+        fullWidth: true,
+      },
       {
         name: 'message',
         label: 'Message',

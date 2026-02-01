@@ -8,6 +8,7 @@ import {
   RotateCcw,
   XCircle,
   MessageSquare,
+  HelpCircle,
 } from 'lucide-react';
 import type { Action, ActionType } from '@tracearr/shared';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ACTION_DEFINITIONS,
   getAllActionTypes,
@@ -195,11 +197,35 @@ function ConfigFieldInput({ field, value, onChange }: ConfigFieldInputProps) {
 
   // Select input
   if (field.type === 'select') {
+    const hasTooltips = field.options?.some((opt) => opt.tooltip);
     return (
       <div className="flex items-center gap-2">
-        <span className="text-muted-foreground text-sm whitespace-nowrap">{field.label}:</span>
+        <span className="text-muted-foreground flex items-center gap-1 text-sm whitespace-nowrap">
+          {field.label}:
+          {hasTooltips && (
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="text-muted-foreground/70 hover:text-muted-foreground h-3.5 w-3.5 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="start" className="w-max">
+                  <div className="space-y-1.5">
+                    {field.options
+                      ?.filter((opt) => opt.tooltip)
+                      .map((opt) => (
+                        <div key={opt.value}>
+                          <span className="font-medium">{opt.label}:</span>{' '}
+                          <span className="text-muted-foreground">{opt.tooltip}</span>
+                        </div>
+                      ))}
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </span>
         <Select value={(value as string) ?? ''} onValueChange={onChange}>
-          <SelectTrigger className="w-[120px]">
+          <SelectTrigger className={cn('w-[120px]', hasTooltips && 'w-[200px]')}>
             <SelectValue placeholder="Select..." />
           </SelectTrigger>
           <SelectContent>

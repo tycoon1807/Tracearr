@@ -376,6 +376,8 @@ export type {
   LibraryPatternsQueryInput,
   LibraryCompletionQueryInput,
   TopContentQueryInput,
+  // Session target type
+  SessionTarget,
 } from './schemas.js';
 
 // Constant exports

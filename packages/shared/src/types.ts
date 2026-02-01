@@ -1,8 +1,11 @@
 /**
  * Core type definitions for Tracearr
  */
-import type { webhookFormatSchema } from './schemas.js';
-import { type z } from 'zod';
+import type { webhookFormatSchema, sessionTargetSchema } from './schemas.js';
+import type { z } from 'zod';
+
+// Re-export SessionTarget for use in action interfaces
+type SessionTarget = z.infer<typeof sessionTargetSchema>;
 
 // User role - combined permission level and account status
 // Can log in: owner, admin, viewer
@@ -568,11 +571,13 @@ export interface KillStreamAction {
   cooldown_minutes?: number;
   /** Message to display to user before termination. If omitted, terminates silently. */
   message?: string;
+  target?: SessionTarget;
 }
 
 export interface MessageClientAction {
   type: 'message_client';
   message: string;
+  target?: SessionTarget;
 }
 
 export type Action =

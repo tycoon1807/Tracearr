@@ -9,6 +9,7 @@ import { eq, desc } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { terminationLogs, sessions } from '../db/schema.js';
 import { createMediaServerClient } from './mediaServer/index.js';
+import { getCacheService, getPubSubService } from './cache.js';
 import type { ServerType } from '@tracearr/shared';
 
 // ============================================================================
@@ -35,10 +36,14 @@ export interface TerminateSessionOptions {
   reason?: string;
 }
 
+export type TerminationOutcome = 'terminated' | 'already_gone' | 'failed';
+
 export interface TerminationResult {
   success: boolean;
   terminationLogId: string;
   error?: string;
+  /** Specific outcome of the termination attempt */
+  outcome: TerminationOutcome;
 }
 
 // ============================================================================
@@ -92,6 +97,7 @@ export async function terminateSession(
       success: false,
       terminationLogId: '',
       error: 'Session not found in database',
+      outcome: 'failed',
     };
   }
 
@@ -129,26 +135,40 @@ export async function terminateSession(
       success: false,
       terminationLogId: logEntries[0]?.id ?? '',
       error: 'No session ID available for termination',
+      outcome: 'failed',
     };
   }
 
   // Attempt to terminate the session
   let success = false;
   let errorMessage: string | null = null;
+  let outcome: TerminationOutcome = 'failed';
 
   try {
     await client.terminateSession(terminationSessionId, reason);
     success = true;
+    outcome = 'terminated';
   } catch (err) {
-    errorMessage = err instanceof Error ? err.message : 'Unknown error during termination';
+    const errMsg = err instanceof Error ? err.message : 'Unknown error during termination';
+
+    // Treat "not found" as success - session is already gone
+    if (errMsg.includes('not found') || errMsg.includes('404')) {
+      success = true;
+      outcome = 'already_gone';
+      errorMessage = null;
+    } else {
+      errorMessage = errMsg;
+      outcome = 'failed';
+    }
   }
 
-  // If termination was successful, mark the session as stopped in our database
+  // If termination was successful (or session already gone), clean up locally
   if (success) {
     const now = new Date();
     const startedAt = session.startedAt ? new Date(session.startedAt) : now;
     const durationMs = now.getTime() - startedAt.getTime();
 
+    // Update database
     await db
       .update(sessions)
       .set({
@@ -158,6 +178,29 @@ export async function terminateSession(
         forceStopped: true,
       })
       .where(eq(sessions.id, session.id));
+
+    // Update cache (remove from active sessions)
+    const cacheService = getCacheService();
+    if (cacheService) {
+      try {
+        await cacheService.removeActiveSession(session.id);
+        await cacheService.removeUserSession(session.serverUserId, session.id);
+      } catch (cacheErr) {
+        // Log but don't fail - DB is source of truth
+        console.error('[Termination] Failed to update cache:', cacheErr);
+      }
+    }
+
+    // Broadcast stop event
+    const pubSubService = getPubSubService();
+    if (pubSubService) {
+      try {
+        await pubSubService.publish('session:stopped', session.id);
+      } catch (pubSubErr) {
+        // Log but don't fail - clients will sync on next poll
+        console.error('[Termination] Failed to broadcast stop:', pubSubErr);
+      }
+    }
   }
 
   // Log the termination attempt
@@ -181,6 +224,7 @@ export async function terminateSession(
     success,
     terminationLogId: logEntries[0]?.id ?? '',
     error: errorMessage ?? undefined,
+    outcome,
   };
 }
 
