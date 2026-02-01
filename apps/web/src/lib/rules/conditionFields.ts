@@ -209,10 +209,16 @@ export const FIELD_DEFINITIONS: Record<ConditionField, FieldDefinition> = {
   is_transcoding: {
     field: 'is_transcoding',
     label: 'Is Transcoding',
-    description: 'Whether the stream is being transcoded',
+    description: 'Whether video or audio streams are being transcoded',
     category: 'stream_quality',
     operators: EQUALITY_OPERATORS,
-    valueType: 'boolean',
+    valueType: 'select',
+    options: [
+      { value: 'video', label: 'Video' },
+      { value: 'audio', label: 'Audio' },
+      { value: 'video_or_audio', label: 'Video or Audio' },
+      { value: 'neither', label: 'Neither (Direct Play)' },
+    ],
   },
   is_transcode_downgrade: {
     field: 'is_transcode_downgrade',

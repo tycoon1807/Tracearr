@@ -392,9 +392,9 @@ const evaluateIsTranscoding: ConditionEvaluator = (
       case 'audio':
         return session.audioDecision === 'transcode';
       case 'video_or_audio':
-        return session.isTranscode === true;
+        return session.isTranscode;
       case 'neither':
-        return session.isTranscode === false;
+        return !session.isTranscode;
     }
   }
 
