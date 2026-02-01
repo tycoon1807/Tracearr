@@ -63,6 +63,10 @@ export function ActionRow({ action, onChange, onRemove, showRemove = true }: Act
     } as Action);
   };
 
+  // Split fields into inline and full-width
+  const inlineFields = def.configFields.filter((f) => !f.fullWidth);
+  const fullWidthFields = def.configFields.filter((f) => f.fullWidth);
+
   return (
     <div
       className={cn(
@@ -94,9 +98,9 @@ export function ActionRow({ action, onChange, onRemove, showRemove = true }: Act
           </SelectContent>
         </Select>
 
-        {/* Config Fields */}
+        {/* Inline Config Fields */}
         <div className="flex flex-1 items-center gap-6">
-          {def.configFields.map((field) => (
+          {inlineFields.map((field) => (
             <ConfigFieldInput
               key={field.name}
               field={field}
@@ -119,6 +123,20 @@ export function ActionRow({ action, onChange, onRemove, showRemove = true }: Act
           </Button>
         )}
       </div>
+
+      {/* Full-width Config Fields */}
+      {fullWidthFields.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {fullWidthFields.map((field) => (
+            <ConfigFieldInput
+              key={field.name}
+              field={field}
+              value={(action as unknown as Record<string, unknown>)[field.name]}
+              onChange={(value) => handleFieldChange(field.name, value)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Description */}
       <p className="text-muted-foreground mt-2 text-xs">{def.description}</p>

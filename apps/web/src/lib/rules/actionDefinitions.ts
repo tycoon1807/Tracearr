@@ -28,6 +28,8 @@ export interface ConfigField {
   unit?: string;
   placeholder?: string;
   description?: string;
+  /** If true, renders on its own line below other fields */
+  fullWidth?: boolean;
 }
 
 // Action definition interface
@@ -203,6 +205,14 @@ export const ACTION_DEFINITIONS: Record<ActionType, ActionDefinition> = {
         step: 5,
         unit: 'minutes',
         description: 'Minimum time between terminations',
+      },
+      {
+        name: 'message',
+        label: 'Message',
+        type: 'text',
+        placeholder: 'Message shown to user (optional)',
+        description: 'Text displayed before termination. Leave empty for silent termination.',
+        fullWidth: true,
       },
     ],
   },
