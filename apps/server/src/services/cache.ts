@@ -55,6 +55,10 @@ export interface CacheService {
     operation: () => Promise<T>
   ): Promise<T | null>;
 
+  // Termination cooldown (prevents re-creating recently terminated sessions)
+  setTerminationCooldown(serverId: string, sessionKey: string): Promise<void>;
+  hasTerminationCooldown(serverId: string, sessionKey: string): Promise<boolean>;
+
   // Health check
   ping(): Promise<boolean>;
 }
@@ -385,6 +389,19 @@ export function createCacheService(redis: Redis): CacheService {
       } finally {
         await redis.del(lockKey);
       }
+    },
+
+    // Termination cooldown methods
+    async setTerminationCooldown(serverId: string, sessionKey: string): Promise<void> {
+      const cooldownKey = `termination:cooldown:${serverId}:${sessionKey}`;
+      // 60 second cooldown to prevent re-creating recently terminated sessions
+      await redis.setex(cooldownKey, 60, '1');
+    },
+
+    async hasTerminationCooldown(serverId: string, sessionKey: string): Promise<boolean> {
+      const cooldownKey = `termination:cooldown:${serverId}:${sessionKey}`;
+      const exists = await redis.exists(cooldownKey);
+      return exists === 1;
     },
 
     // Health check

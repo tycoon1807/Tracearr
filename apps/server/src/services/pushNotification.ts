@@ -918,6 +918,50 @@ export class PushNotificationService {
 
     await sendPushNotifications(messages);
   }
+
+  /**
+   * Send a rule-triggered notification directly to all devices with push enabled.
+   * Bypasses user preference filters (violationMinSeverity, ruleTypes, etc.)
+   * since rule notifications are explicitly configured by the admin.
+   */
+  async notifyRuleDirect(
+    title: string,
+    message: string,
+    data: Record<string, unknown>
+  ): Promise<void> {
+    const sessions = await getSessionsWithPreferences();
+    if (sessions.length === 0) return;
+
+    // Only filter by master push toggle - bypass all other preference filters.
+    // Rule notifications are explicitly configured by the admin in the rule action,
+    // so they should not be filtered by user violation preferences.
+    const eligibleSessions = sessions.filter((s) => s.pushEnabled);
+
+    if (eligibleSessions.length === 0) {
+      console.log(`[Push] No sessions with push enabled for rule notification`);
+      return;
+    }
+
+    console.log(
+      `[Push] Sending rule notification to ${eligibleSessions.length} device(s): ${title}`
+    );
+
+    const messages = eligibleSessions.map((s) =>
+      buildPushMessage(s.expoPushToken, s.deviceSecret, {
+        title,
+        subtitle: 'Rule Notification',
+        body: message,
+        data: {
+          type: 'rule_notification',
+          ...data,
+        },
+        priority: 'default',
+        channelId: 'alerts', // Use alerts channel (rules channel doesn't exist on mobile)
+      })
+    );
+
+    await sendPushNotifications(messages);
+  }
 }
 
 // Export singleton instance

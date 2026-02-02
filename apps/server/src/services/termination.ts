@@ -185,6 +185,9 @@ export async function terminateSession(
       try {
         await cacheService.removeActiveSession(session.id);
         await cacheService.removeUserSession(session.serverUserId, session.id);
+
+        // Set a cooldown to prevent re-creating this session if delayed SSE events arrive
+        await cacheService.setTerminationCooldown(session.serverId, session.sessionKey);
       } catch (cacheErr) {
         // Log but don't fail - DB is source of truth
         console.error('[Termination] Failed to update cache:', cacheErr);

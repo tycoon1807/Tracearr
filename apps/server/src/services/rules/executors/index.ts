@@ -308,11 +308,18 @@ const executeKillStream: ActionExecutor = async (
   const message = typedAction.message;
   const target = typedAction.target ?? 'triggering';
 
+  // Include triggering session in activeSessions if not already present.
+  // The triggering session may not be in the cache yet when rules are evaluated,
+  // so we ensure it's included for accurate targeting resolution.
+  const sessionsForTargeting = activeSessions.some((s) => s.id === session.id)
+    ? activeSessions
+    : [...activeSessions, session];
+
   const sessionsToKill = resolveTargetSessions({
     target,
     triggeringSession: session,
     serverUserId: serverUser.id,
-    activeSessions,
+    activeSessions: sessionsForTargeting,
   });
 
   for (const targetSession of sessionsToKill) {
@@ -336,11 +343,18 @@ const executeMessageClient: ActionExecutor = async (
     return;
   }
 
+  // Include triggering session in activeSessions if not already present.
+  // The triggering session may not be in the cache yet when rules are evaluated,
+  // so we ensure it's included for accurate targeting resolution.
+  const sessionsForTargeting = activeSessions.some((s) => s.id === session.id)
+    ? activeSessions
+    : [...activeSessions, session];
+
   const sessionsToMessage = resolveTargetSessions({
     target,
     triggeringSession: session,
     serverUserId: serverUser.id,
-    activeSessions,
+    activeSessions: sessionsForTargeting,
   });
 
   for (const targetSession of sessionsToMessage) {

@@ -355,6 +355,20 @@ async function processServerSessions(
               return null;
             }
 
+            // Check if this session was recently terminated (cooldown prevents re-creation)
+            if (cacheService) {
+              const hasCooldown = await cacheService.hasTerminationCooldown(
+                server.id,
+                processed.sessionKey
+              );
+              if (hasCooldown) {
+                console.log(
+                  `[Poller] Session ${processed.sessionKey} was recently terminated, skipping create`
+                );
+                return null;
+              }
+            }
+
             if (processed.ratingKey && userDetail?.id) {
               // Time bound reduces TimescaleDB chunk scanning
               const chunkBound = new Date(Date.now() - ACTIVE_SESSION_CHUNK_BOUND_MS);
@@ -478,6 +492,19 @@ async function processServerSessions(
                 cachedSessionKeys.add(sessionKey);
                 console.log(
                   `[Poller] Session created by SSE for ${processed.sessionKey}, skipping`
+                );
+                return null;
+              }
+
+              // Check if this session was recently terminated (cooldown prevents re-creation)
+              // Note: cacheService is guaranteed non-null here since we're inside withSessionCreateLock
+              const hasCooldown = await cacheService!.hasTerminationCooldown(
+                server.id,
+                processed.sessionKey
+              );
+              if (hasCooldown) {
+                console.log(
+                  `[Poller] Session ${processed.sessionKey} was recently terminated, skipping stale recovery`
                 );
                 return null;
               }

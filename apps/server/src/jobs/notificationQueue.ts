@@ -209,7 +209,12 @@ async function processRuleNotification(
         break;
 
       case 'push':
-        await pushNotificationService.notifyViolation(payload);
+        // Use notifyRuleDirect to bypass user preference filters.
+        // Rule notifications are admin-configured and should reach all devices with push enabled.
+        await pushNotificationService.notifyRuleDirect(customTitle, customMessage, {
+          ruleId: payload.rule.id,
+          ruleName: payload.rule.name,
+        });
         break;
 
       // 'email' not implemented yet
