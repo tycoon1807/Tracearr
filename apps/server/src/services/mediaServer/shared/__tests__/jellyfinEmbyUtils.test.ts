@@ -174,12 +174,12 @@ describe('extractMusicMetadata', () => {
     });
   });
 
-  it('extracts AlbumArtist as primary artist', () => {
+  it('prefers track artist over album artist for compilations', () => {
     const result = extractMusicMetadata({
-      AlbumArtist: 'The Beatles',
+      AlbumArtist: 'Various Artists',
       Artists: ['John Lennon'],
     });
-    expect(result.artistName).toBe('The Beatles');
+    expect(result.artistName).toBe('John Lennon');
   });
 
   it('falls back to Artists array when no AlbumArtist', () => {
