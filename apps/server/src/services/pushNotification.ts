@@ -16,6 +16,7 @@ import { getPushRateLimiter } from './pushRateLimiter.js';
 import { quietHoursService, type NotificationSeverity } from './quietHours.js';
 import { pushEncryptionService } from './pushEncryption.js';
 import { getNetworkSettings } from '../routes/settings.js';
+import { buildPushPosterUrl, buildPushAvatarUrl, buildLogoUrl } from './imageProxy.js';
 
 // Initialize Expo SDK
 const expo = new Expo();
@@ -558,6 +559,11 @@ export class PushNotificationService {
     // Get server name for notification title
     const serverName = violation.server?.name || 'Media Server';
 
+    // Get external URL for rich notification image (user avatar)
+    const { externalUrl } = await getNetworkSettings();
+    const serverId = violation.server?.id;
+    const imageUrl = buildPushAvatarUrl(externalUrl, serverId, violation.user?.thumbUrl);
+
     const messages = activeSessions.map((session) =>
       buildPushMessage(session.expoPushToken, session.deviceSecret, {
         title: serverName,
@@ -575,6 +581,7 @@ export class PushNotificationService {
         channelId: 'violations',
         badge: 1,
         sound: severity === 'high' ? 'default' : undefined,
+        imageUrl,
       })
     );
 
@@ -622,6 +629,10 @@ export class PushNotificationService {
     const serverName = session.server?.name || 'Media Server';
     const formattedTitle = formatMediaTitle(session);
 
+    // Get external URL for rich notification image
+    const { externalUrl } = await getNetworkSettings();
+    const imageUrl = buildPushPosterUrl(externalUrl, session.server?.id, session.thumbPath);
+
     const messages = activeSessions.map((s) =>
       buildPushMessage(s.expoPushToken, s.deviceSecret, {
         title: serverName,
@@ -637,6 +648,7 @@ export class PushNotificationService {
         },
         priority: 'default',
         channelId: 'sessions',
+        imageUrl,
       })
     );
 
@@ -691,6 +703,10 @@ export class PushNotificationService {
         ? `${Math.floor(durationMins / 60)}h ${durationMins % 60}m`
         : `${durationMins}m`;
 
+    // Get external URL for rich notification image
+    const { externalUrl } = await getNetworkSettings();
+    const imageUrl = buildPushPosterUrl(externalUrl, session.server?.id, session.thumbPath);
+
     const messages = activeSessions.map((s) =>
       buildPushMessage(s.expoPushToken, s.deviceSecret, {
         title: serverName,
@@ -706,6 +722,7 @@ export class PushNotificationService {
         },
         priority: 'default',
         channelId: 'sessions',
+        imageUrl,
       })
     );
 
@@ -745,6 +762,10 @@ export class PushNotificationService {
       return;
     }
 
+    // Get external URL for Tracearr logo
+    const { externalUrl } = await getNetworkSettings();
+    const imageUrl = buildLogoUrl(externalUrl);
+
     const messages = activeSessions.map((s) =>
       buildPushMessage(s.expoPushToken, s.deviceSecret, {
         title: serverName,
@@ -758,6 +779,7 @@ export class PushNotificationService {
         priority: 'high',
         channelId: 'alerts',
         sound: 'default',
+        imageUrl,
       })
     );
 
@@ -901,6 +923,10 @@ export class PushNotificationService {
       return;
     }
 
+    // Get external URL for Tracearr logo
+    const { externalUrl } = await getNetworkSettings();
+    const imageUrl = buildLogoUrl(externalUrl);
+
     const messages = activeSessions.map((s) =>
       buildPushMessage(s.expoPushToken, s.deviceSecret, {
         title: serverName,
@@ -913,6 +939,62 @@ export class PushNotificationService {
         },
         priority: 'default',
         channelId: 'alerts',
+        imageUrl,
+      })
+    );
+
+    await sendPushNotifications(messages);
+  }
+
+  /**
+   * Send a rule-triggered notification directly to all devices with push enabled.
+   * Bypasses user preference filters (violationMinSeverity, ruleTypes, etc.)
+   * since rule notifications are explicitly configured by the admin.
+   */
+  async notifyRuleDirect(
+    title: string,
+    message: string,
+    data: Record<string, unknown>
+  ): Promise<void> {
+    const sessions = await getSessionsWithPreferences();
+    if (sessions.length === 0) return;
+
+    // Only filter by master push toggle - bypass all other preference filters.
+    // Rule notifications are explicitly configured by the admin in the rule action,
+    // so they should not be filtered by user violation preferences.
+    const eligibleSessions = sessions.filter((s) => s.pushEnabled);
+
+    if (eligibleSessions.length === 0) {
+      console.log(`[Push] No sessions with push enabled for rule notification`);
+      return;
+    }
+
+    console.log(
+      `[Push] Sending rule notification to ${eligibleSessions.length} device(s): ${title}`
+    );
+
+    // Get external URL for rich notification image
+    // Use session poster if available, otherwise user avatar
+    const { externalUrl } = await getNetworkSettings();
+    const serverId = data.serverId as string | undefined;
+    const thumbPath = data.thumbPath as string | undefined;
+    const userThumbUrl = data.userThumbUrl as string | undefined;
+    const imageUrl =
+      buildPushPosterUrl(externalUrl, serverId, thumbPath) ??
+      buildPushAvatarUrl(externalUrl, serverId, userThumbUrl);
+
+    const messages = eligibleSessions.map((s) =>
+      buildPushMessage(s.expoPushToken, s.deviceSecret, {
+        title,
+        subtitle: 'Rule Notification',
+        body: message,
+        data: {
+          type: 'rule_notification',
+          ...data,
+        },
+        priority: 'default',
+        channelId: 'alerts', // Use alerts channel (rules channel doesn't exist on mobile)
+        imageUrl,
       })
     );
 

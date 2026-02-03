@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -58,6 +59,7 @@ import type {
   RulesFilterOptions,
 } from '@tracearr/shared';
 import { RuleBuilderDialog, getRuleIcon, getRuleSummary, isV2Rule } from '@/components/rules';
+import { CLASSIC_RULE_TEMPLATES, type ClassicRuleTemplate } from '@/lib/rules';
 import {
   getSpeedUnit,
   getDistanceUnit,
@@ -256,13 +258,12 @@ function RuleParamsForm({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="maxSpeedKmh">{t('rules.maxSpeed', { unit: speedUnit })}</Label>
-            <Input
+            <NumericInput
               id="maxSpeedKmh"
-              type="number"
+              min={0}
               value={displayValue}
-              onChange={(e) => {
+              onChange={(inputValue) => {
                 // Convert display value back to metric for storage
-                const inputValue = parseInt(e.target.value) || 0;
                 const metricValue = Math.round(toMetricDistance(inputValue, unitSystem));
                 onChange({ ...params, maxSpeedKmh: metricValue });
               }}
@@ -288,13 +289,12 @@ function RuleParamsForm({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="minDistanceKm">{t('rules.minDistance', { unit: distanceUnit })}</Label>
-            <Input
+            <NumericInput
               id="minDistanceKm"
-              type="number"
+              min={0}
               value={displayValue}
-              onChange={(e) => {
+              onChange={(inputValue) => {
                 // Convert display value back to metric for storage
-                const inputValue = parseInt(e.target.value) || 0;
                 const metricValue = Math.round(toMetricDistance(inputValue, unitSystem));
                 onChange({ ...params, minDistanceKm: metricValue });
               }}
@@ -316,23 +316,23 @@ function RuleParamsForm({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="maxIps">{t('rules.maxIps')}</Label>
-            <Input
+            <NumericInput
               id="maxIps"
-              type="number"
+              min={1}
               value={(params as { maxIps: number; windowHours: number }).maxIps}
-              onChange={(e) => {
-                onChange({ ...params, maxIps: parseInt(e.target.value) || 0 });
+              onChange={(value) => {
+                onChange({ ...params, maxIps: value });
               }}
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="windowHours">{t('rules.timeWindow')}</Label>
-            <Input
+            <NumericInput
               id="windowHours"
-              type="number"
+              min={1}
               value={(params as { maxIps: number; windowHours: number }).windowHours}
-              onChange={(e) => {
-                onChange({ ...params, windowHours: parseInt(e.target.value) || 0 });
+              onChange={(value) => {
+                onChange({ ...params, windowHours: value });
               }}
             />
           </div>
@@ -362,12 +362,12 @@ function RuleParamsForm({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="maxStreams">{t('rules.maxStreams')}</Label>
-            <Input
+            <NumericInput
               id="maxStreams"
-              type="number"
+              min={1}
               value={(params as { maxStreams: number }).maxStreams}
-              onChange={(e) => {
-                onChange({ ...params, maxStreams: parseInt(e.target.value) || 0 });
+              onChange={(value) => {
+                onChange({ ...params, maxStreams: value });
               }}
             />
             <p className="text-muted-foreground text-xs">{t('rules.maxStreamsDefault')}</p>
@@ -401,13 +401,12 @@ function RuleParamsForm({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="inactivityValue">{t('rules.inactivityPeriod')}</Label>
-              <Input
+              <NumericInput
                 id="inactivityValue"
-                type="number"
                 min={1}
                 value={inactivityParams.inactivityValue}
-                onChange={(e) => {
-                  onChange({ ...params, inactivityValue: parseInt(e.target.value) || 1 });
+                onChange={(value) => {
+                  onChange({ ...params, inactivityValue: value });
                 }}
               />
             </div>
@@ -721,15 +720,19 @@ export function Rules() {
 
   const unitSystem = settings?.unitSystem ?? 'metric';
 
-  // V1 Classic rule dialog state
+  // V1 Classic rule dialog state (for editing legacy rules only)
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<Rule | undefined>();
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
 
+  // Template picker for creating new rules from classic templates
+  const [isTemplatePicker, setIsTemplatePicker] = useState(false);
+
   // V2 Custom rule builder dialog state
   const [isV2DialogOpen, setIsV2DialogOpen] = useState(false);
   const [editingV2Rule, setEditingV2Rule] = useState<Rule | undefined>();
+  const [selectedTemplate, setSelectedTemplate] = useState<ClassicRuleTemplate | undefined>();
   const createRuleV2 = useCreateRuleV2();
   const updateRuleV2 = useUpdateRuleV2();
   const { data: rulesFilterOptions } = useRulesFilterOptions();
@@ -813,23 +816,33 @@ export function Rules() {
     });
   };
 
-  const openCreateDialog = () => {
-    setEditingRule(undefined);
-    setIsDialogOpen(true);
-  };
-
+  // Legacy V1 rule editing (for backwards compatibility)
   const openEditDialog = (rule: Rule) => {
     setEditingRule(rule);
     setIsDialogOpen(true);
   };
 
+  // Template picker for classic rules
+  const openTemplatePicker = () => {
+    setIsTemplatePicker(true);
+  };
+
+  const handleTemplateSelect = (template: ClassicRuleTemplate) => {
+    setSelectedTemplate(template);
+    setIsTemplatePicker(false);
+    setEditingV2Rule(undefined);
+    setIsV2DialogOpen(true);
+  };
+
   // V2 Custom rule handlers
   const openV2CreateDialog = () => {
+    setSelectedTemplate(undefined);
     setEditingV2Rule(undefined);
     setIsV2DialogOpen(true);
   };
 
   const openV2EditDialog = (rule: Rule) => {
+    setSelectedTemplate(undefined);
     setEditingV2Rule(rule);
     setIsV2DialogOpen(true);
   };
@@ -887,7 +900,7 @@ export function Rules() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={openCreateDialog}>
+            <DropdownMenuItem onClick={openTemplatePicker}>
               <Settings2 className="mr-2 h-4 w-4" />
               Classic Rule
             </DropdownMenuItem>
@@ -956,7 +969,7 @@ export function Rules() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onClick={openCreateDialog}>
+                <DropdownMenuItem onClick={openTemplatePicker}>
                   <Settings2 className="mr-2 h-4 w-4" />
                   Classic Rule
                 </DropdownMenuItem>
@@ -1027,11 +1040,55 @@ export function Rules() {
         isLoading={deleteRule.isPending}
       />
 
+      {/* Template Picker Dialog */}
+      <Dialog open={isTemplatePicker} onOpenChange={setIsTemplatePicker}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Choose a Rule Template</DialogTitle>
+            <DialogDescription>
+              Select a pre-configured rule type to get started quickly.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {CLASSIC_RULE_TEMPLATES.map((template) => (
+              <button
+                key={template.type}
+                onClick={() => handleTemplateSelect(template)}
+                className="hover:bg-accent flex items-center gap-4 rounded-lg border p-4 text-left transition-colors"
+              >
+                <div className="bg-muted flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
+                  {RULE_TYPE_ICONS[template.type]}
+                </div>
+                <div>
+                  <div className="font-medium">{template.label}</div>
+                  <div className="text-muted-foreground text-sm">{template.description}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* V2 Custom Rule Builder Dialog */}
       <RuleBuilderDialog
         open={isV2DialogOpen}
-        onOpenChange={setIsV2DialogOpen}
-        rule={editingV2Rule}
+        onOpenChange={(open) => {
+          setIsV2DialogOpen(open);
+          if (!open) setSelectedTemplate(undefined);
+        }}
+        rule={
+          editingV2Rule ??
+          (selectedTemplate
+            ? {
+                id: '',
+                name: selectedTemplate.defaultName,
+                description: selectedTemplate.description,
+                isActive: true,
+                conditions: selectedTemplate.conditions,
+                actions: selectedTemplate.actions,
+              }
+            : undefined)
+        }
         onSave={handleV2Save}
         isLoading={createRuleV2.isPending || updateRuleV2.isPending}
         filterOptions={rulesFilterOptions}

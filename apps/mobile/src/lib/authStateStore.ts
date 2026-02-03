@@ -10,6 +10,7 @@ import { zustandStorage } from './storage';
 import * as ResilientStorage from './resilientStorage';
 import { api, resetApiClient } from './api';
 import { isEncryptionAvailable, getDeviceSecret } from './crypto';
+import { unregisterBackgroundNotificationTask } from './backgroundTasks';
 
 // Types
 export interface StoredServer {
@@ -26,7 +27,11 @@ export interface UserInfo {
   role: 'admin' | 'owner' | 'user';
 }
 
-type ConnectionState = 'connected' | 'disconnected' | 'unauthenticated';
+// 'unknown' = initial state before first validation (don't show banners)
+// 'connected' = successfully connected to server
+// 'disconnected' = was connected but lost connection (show offline banner)
+// 'unauthenticated' = token revoked (show re-auth screen)
+type ConnectionState = 'unknown' | 'connected' | 'disconnected' | 'unauthenticated';
 type TokenStatus = 'valid' | 'revoked' | 'refreshing' | 'unknown';
 
 interface AuthState {
@@ -99,7 +104,7 @@ export const useAuthStateStore = create<AuthState>()(
       // Initial state
       server: null,
       user: null,
-      connectionState: 'disconnected',
+      connectionState: 'unknown',
       tokenStatus: 'unknown',
       isInitializing: true,
       error: null,
@@ -204,6 +209,9 @@ export const useAuthStateStore = create<AuthState>()(
       },
 
       unpairServer: async () => {
+        // Clean up push notification background tasks
+        await unregisterBackgroundNotificationTask();
+
         // Clear tokens using resilient storage
         await ResilientStorage.deleteItemAsync(STORAGE_KEYS.ACCESS_TOKEN);
         await ResilientStorage.deleteItemAsync(STORAGE_KEYS.REFRESH_TOKEN);

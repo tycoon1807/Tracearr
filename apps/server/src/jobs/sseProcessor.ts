@@ -166,6 +166,20 @@ async function handlePlaying(event: {
     if (existingSession) {
       await updateExistingSession(existingSession, session, 'playing');
     } else {
+      // Check if this session was recently terminated (cooldown prevents re-creation)
+      if (cacheService) {
+        const hasCooldown = await cacheService.hasTerminationCooldown(
+          serverId,
+          notification.sessionKey
+        );
+        if (hasCooldown) {
+          console.log(
+            `[SSEProcessor] Session ${notification.sessionKey} was recently terminated, ignoring playing event`
+          );
+          return;
+        }
+      }
+
       // Pass server to avoid redundant DB lookup
       await createNewSession(serverId, session, server);
     }

@@ -1,8 +1,11 @@
 /**
  * Core type definitions for Tracearr
  */
-import type { webhookFormatSchema } from './schemas.js';
-import { type z } from 'zod';
+import type { webhookFormatSchema, sessionTargetSchema } from './schemas.js';
+import type { z } from 'zod';
+
+// Re-export SessionTarget for use in action interfaces
+type SessionTarget = z.infer<typeof sessionTargetSchema>;
 
 // User role - combined permission level and account status
 // Can log in: owner, admin, viewer
@@ -447,6 +450,8 @@ export type StreamQualityField =
   | 'is_transcode_downgrade'
   | 'source_bitrate_mbps';
 
+export type TranscodingConditionValue = 'video' | 'audio' | 'video_or_audio' | 'neither';
+
 export type UserAttributeField = 'user_id' | 'trust_score' | 'account_age_days';
 
 export type DeviceClientField = 'device_type' | 'client_name' | 'platform';
@@ -496,6 +501,10 @@ export interface Condition {
   value: ConditionValue;
   params?: {
     window_hours?: number; // for velocity checks
+    // When true, exclude sessions from the same device when comparing across sessions.
+    // Useful for: concurrent_streams (don't double-count same device),
+    // travel_speed_kmh (VPN switch isn't travel), active_session_distance_km (same device = same location)
+    exclude_same_device?: boolean;
   };
 }
 
@@ -560,11 +569,15 @@ export interface KillStreamAction {
   delay_seconds?: number;
   require_confirmation?: boolean;
   cooldown_minutes?: number;
+  /** Message to display to user before termination. If omitted, terminates silently. */
+  message?: string;
+  target?: SessionTarget;
 }
 
 export interface MessageClientAction {
   type: 'message_client';
   message: string;
+  target?: SessionTarget;
 }
 
 export type Action =

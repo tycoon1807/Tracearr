@@ -8,10 +8,12 @@ import {
   RotateCcw,
   XCircle,
   MessageSquare,
+  HelpCircle,
 } from 'lucide-react';
 import type { Action, ActionType } from '@tracearr/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import {
   Select,
   SelectContent,
@@ -19,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ACTION_DEFINITIONS,
   getAllActionTypes,
@@ -62,6 +65,10 @@ export function ActionRow({ action, onChange, onRemove, showRemove = true }: Act
     } as Action);
   };
 
+  // Split fields into inline and full-width
+  const inlineFields = def.configFields.filter((f) => !f.fullWidth);
+  const fullWidthFields = def.configFields.filter((f) => f.fullWidth);
+
   return (
     <div
       className={cn(
@@ -93,9 +100,9 @@ export function ActionRow({ action, onChange, onRemove, showRemove = true }: Act
           </SelectContent>
         </Select>
 
-        {/* Config Fields */}
+        {/* Inline Config Fields */}
         <div className="flex flex-1 items-center gap-6">
-          {def.configFields.map((field) => (
+          {inlineFields.map((field) => (
             <ConfigFieldInput
               key={field.name}
               field={field}
@@ -118,6 +125,20 @@ export function ActionRow({ action, onChange, onRemove, showRemove = true }: Act
           </Button>
         )}
       </div>
+
+      {/* Full-width Config Fields */}
+      {fullWidthFields.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {fullWidthFields.map((field) => (
+            <ConfigFieldInput
+              key={field.name}
+              field={field}
+              value={(action as unknown as Record<string, unknown>)[field.name]}
+              onChange={(value) => handleFieldChange(field.name, value)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Description */}
       <p className="text-muted-foreground mt-2 text-xs">{def.description}</p>
@@ -146,14 +167,13 @@ function ConfigFieldInput({ field, value, onChange }: ConfigFieldInputProps) {
     return (
       <div className="flex items-center gap-2">
         <span className="text-muted-foreground text-sm whitespace-nowrap">{field.label}:</span>
-        <Input
-          type="number"
+        <NumericInput
           className="w-20"
           min={field.min}
           max={field.max}
           step={field.step}
           value={(value as number) ?? field.min ?? 0}
-          onChange={(e) => onChange(Number(e.target.value))}
+          onChange={(v) => onChange(v)}
         />
         {field.unit && <span className="text-muted-foreground text-sm">{field.unit}</span>}
       </div>
@@ -177,11 +197,35 @@ function ConfigFieldInput({ field, value, onChange }: ConfigFieldInputProps) {
 
   // Select input
   if (field.type === 'select') {
+    const hasTooltips = field.options?.some((opt) => opt.tooltip);
     return (
       <div className="flex items-center gap-2">
-        <span className="text-muted-foreground text-sm whitespace-nowrap">{field.label}:</span>
+        <span className="text-muted-foreground flex items-center gap-1 text-sm whitespace-nowrap">
+          {field.label}:
+          {hasTooltips && (
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="text-muted-foreground/70 hover:text-muted-foreground h-3.5 w-3.5 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="start" className="w-max">
+                  <div className="space-y-1.5">
+                    {field.options
+                      ?.filter((opt) => opt.tooltip)
+                      .map((opt) => (
+                        <div key={opt.value}>
+                          <span className="font-medium">{opt.label}:</span>{' '}
+                          <span className="text-muted-foreground">{opt.tooltip}</span>
+                        </div>
+                      ))}
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </span>
         <Select value={(value as string) ?? ''} onValueChange={onChange}>
-          <SelectTrigger className="w-[120px]">
+          <SelectTrigger className={cn('w-[120px]', hasTooltips && 'w-[200px]')}>
             <SelectValue placeholder="Select..." />
           </SelectTrigger>
           <SelectContent>

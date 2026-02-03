@@ -22,6 +22,7 @@ import { db } from '../db/client.js';
 import { users, serverUsers, servers, sessions, violations, rules } from '../db/schema.js';
 import { getCacheService } from '../services/cache.js';
 import { generateOpenAPIDocument } from './public.openapi.js';
+import { buildPosterUrl, buildAvatarUrl } from '../services/imageProxy.js';
 
 // Pagination schema for public API
 const paginationSchema = z.object({
@@ -230,6 +231,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
           // User info
           username: session.user.identityName ?? session.user.username,
           userThumb: session.user.thumbUrl,
+          userAvatarUrl: buildAvatarUrl(session.serverId, session.user.thumbUrl),
           // Media info
           mediaTitle: session.mediaTitle,
           mediaType: session.mediaType,
@@ -238,6 +240,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
           episodeNumber: session.episodeNumber,
           year: session.year,
           thumbPath: session.thumbPath,
+          posterUrl: buildPosterUrl(session.serverId, session.thumbPath),
           durationMs: session.totalDurationMs,
           // Playback state
           state: session.state,
@@ -376,6 +379,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
         // Server-specific data
         serverId: serverUsers.serverId,
         serverUsername: serverUsers.username,
+        thumbUrl: serverUsers.thumbUrl,
         lastActivityAt: serverUsers.lastActivityAt,
         sessionCount: serverUsers.sessionCount,
         // Server name joined directly
@@ -393,6 +397,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       id: row.id,
       username: row.username,
       displayName: row.name ?? row.serverUsername ?? row.username,
+      thumbUrl: row.thumbUrl,
+      avatarUrl: buildAvatarUrl(row.serverId, row.thumbUrl),
       role: row.role,
       trustScore: row.aggregateTrustScore,
       totalViolations: row.totalViolations,
@@ -461,6 +467,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
         // User info
         userId: serverUsers.userId,
         serverUsername: serverUsers.username,
+        thumbUrl: serverUsers.thumbUrl,
         userName: users.name,
         userUsername: users.username,
       })
@@ -490,6 +497,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       user: {
         id: row.userId,
         username: row.userName ?? row.serverUsername ?? row.userUsername,
+        thumbUrl: row.thumbUrl,
+        avatarUrl: buildAvatarUrl(row.serverId, row.thumbUrl),
       },
     }));
 
@@ -550,6 +559,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
         seasonNumber: sessions.seasonNumber,
         episodeNumber: sessions.episodeNumber,
         year: sessions.year,
+        thumbPath: sessions.thumbPath,
         durationMs: sessions.durationMs,
         progressMs: sessions.progressMs,
         startedAt: sessions.startedAt,
@@ -559,6 +569,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
         // User info
         userId: serverUsers.userId,
         serverUsername: serverUsers.username,
+        userThumbUrl: serverUsers.thumbUrl,
         userName: users.name,
         userUsername: users.username,
       })
@@ -582,6 +593,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       seasonNumber: row.seasonNumber,
       episodeNumber: row.episodeNumber,
       year: row.year,
+      thumbPath: row.thumbPath,
+      posterUrl: buildPosterUrl(row.serverId, row.thumbPath),
       durationMs: row.durationMs,
       progressMs: row.progressMs,
       startedAt: row.startedAt.toISOString(),
@@ -591,6 +604,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       user: {
         id: row.userId,
         username: row.userName ?? row.serverUsername ?? row.userUsername,
+        thumbUrl: row.userThumbUrl,
+        avatarUrl: buildAvatarUrl(row.serverId, row.userThumbUrl),
       },
     }));
 

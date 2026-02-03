@@ -102,6 +102,7 @@ export interface FieldDefinition {
   step?: number;
   placeholder?: string;
   hasWindowHours?: boolean; // For velocity-type fields
+  hasExcludeSameDevice?: boolean; // For cross-session comparison fields
   hidden?: boolean; // Hide from UI (e.g., not yet implemented in backend)
 }
 
@@ -128,6 +129,7 @@ export const FIELD_DEFINITIONS: Record<ConditionField, FieldDefinition> = {
     min: 1,
     max: 100,
     step: 1,
+    hasExcludeSameDevice: true,
   },
   active_session_distance_km: {
     field: 'active_session_distance_km',
@@ -139,6 +141,7 @@ export const FIELD_DEFINITIONS: Record<ConditionField, FieldDefinition> = {
     unit: 'km',
     min: 0,
     step: 10,
+    hasExcludeSameDevice: true,
   },
   travel_speed_kmh: {
     field: 'travel_speed_kmh',
@@ -150,6 +153,7 @@ export const FIELD_DEFINITIONS: Record<ConditionField, FieldDefinition> = {
     unit: 'km/h',
     min: 0,
     step: 50,
+    hasExcludeSameDevice: true,
   },
   unique_ips_in_window: {
     field: 'unique_ips_in_window',
@@ -209,10 +213,16 @@ export const FIELD_DEFINITIONS: Record<ConditionField, FieldDefinition> = {
   is_transcoding: {
     field: 'is_transcoding',
     label: 'Is Transcoding',
-    description: 'Whether the stream is being transcoded',
+    description: 'Whether video or audio streams are being transcoded',
     category: 'stream_quality',
     operators: EQUALITY_OPERATORS,
-    valueType: 'boolean',
+    valueType: 'select',
+    options: [
+      { value: 'video', label: 'Video' },
+      { value: 'audio', label: 'Audio' },
+      { value: 'video_or_audio', label: 'Video or Audio' },
+      { value: 'neither', label: 'Neither (Direct Play)' },
+    ],
   },
   is_transcode_downgrade: {
     field: 'is_transcode_downgrade',

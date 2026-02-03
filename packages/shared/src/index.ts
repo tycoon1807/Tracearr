@@ -68,6 +68,7 @@ export type {
   DeviceType,
   Platform,
   MediaTypeEnum,
+  TranscodingConditionValue,
   // Violation
   ViolationSeverity,
   Violation,
@@ -375,6 +376,8 @@ export type {
   LibraryPatternsQueryInput,
   LibraryCompletionQueryInput,
   TopContentQueryInput,
+  // Session target type
+  SessionTarget,
 } from './schemas.js';
 
 // Constant exports

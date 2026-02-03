@@ -11,6 +11,7 @@ import type {
   MessageClientAction,
 } from '@tracearr/shared';
 import type { ActionExecutor, EvaluationContext } from '../types.js';
+import { resolveTargetSessions } from './targeting.js';
 
 /**
  * Result of executing an action.
@@ -55,7 +56,12 @@ export interface ActionExecutorDeps {
   adjustUserTrust: (userId: string, delta: number) => Promise<void>;
   setUserTrust: (userId: string, value: number) => Promise<void>;
   resetUserTrust: (userId: string) => Promise<void>;
-  terminateSession: (sessionId: string, serverId: string, delay?: number) => Promise<void>;
+  terminateSession: (
+    sessionId: string,
+    serverId: string,
+    delay?: number,
+    message?: string
+  ) => Promise<void>;
   sendClientMessage: (sessionId: string, message: string) => Promise<void>;
   checkCooldown: (ruleId: string, targetId: string, cooldownMinutes: number) => Promise<boolean>;
   setCooldown: (ruleId: string, targetId: string, cooldownMinutes: number) => Promise<void>;
@@ -228,7 +234,7 @@ const executeNotify: ActionExecutor = async (
   context: EvaluationContext,
   action: Action
 ): Promise<void> => {
-  const { session, serverUser, rule } = context;
+  const { session, serverUser, server, rule } = context;
   const typedAction = action as NotifyAction;
   const channels = typedAction.channels;
 
@@ -248,6 +254,10 @@ const executeNotify: ActionExecutor = async (
       sessionId: session.id,
       userId: serverUser.id,
       mediaTitle: session.mediaTitle,
+      // Image data for rich push notifications
+      serverId: server.id,
+      thumbPath: session.thumbPath,
+      userThumbUrl: serverUser.thumbUrl,
     },
   });
 };
@@ -296,11 +306,29 @@ const executeKillStream: ActionExecutor = async (
   context: EvaluationContext,
   action: Action
 ): Promise<void> => {
-  const { session, server } = context;
+  const { session, server, serverUser, activeSessions } = context;
   const typedAction = action as KillStreamAction;
   const delaySeconds = typedAction.delay_seconds ?? 0;
+  const message = typedAction.message;
+  const target = typedAction.target ?? 'triggering';
 
-  await currentDeps.terminateSession(session.id, server.id, delaySeconds);
+  // Include triggering session in activeSessions if not already present.
+  // The triggering session may not be in the cache yet when rules are evaluated,
+  // so we ensure it's included for accurate targeting resolution.
+  const sessionsForTargeting = activeSessions.some((s) => s.id === session.id)
+    ? activeSessions
+    : [...activeSessions, session];
+
+  const sessionsToKill = resolveTargetSessions({
+    target,
+    triggeringSession: session,
+    serverUserId: serverUser.id,
+    activeSessions: sessionsForTargeting,
+  });
+
+  for (const targetSession of sessionsToKill) {
+    await currentDeps.terminateSession(targetSession.id, server.id, delaySeconds, message);
+  }
 };
 
 /**
@@ -310,12 +338,31 @@ const executeMessageClient: ActionExecutor = async (
   context: EvaluationContext,
   action: Action
 ): Promise<void> => {
-  const { session } = context;
+  const { session, serverUser, activeSessions } = context;
   const typedAction = action as MessageClientAction;
   const message = typedAction.message;
+  const target = typedAction.target ?? 'triggering';
 
-  if (message) {
-    await currentDeps.sendClientMessage(session.id, message);
+  if (!message) {
+    return;
+  }
+
+  // Include triggering session in activeSessions if not already present.
+  // The triggering session may not be in the cache yet when rules are evaluated,
+  // so we ensure it's included for accurate targeting resolution.
+  const sessionsForTargeting = activeSessions.some((s) => s.id === session.id)
+    ? activeSessions
+    : [...activeSessions, session];
+
+  const sessionsToMessage = resolveTargetSessions({
+    target,
+    triggeringSession: session,
+    serverUserId: serverUser.id,
+    activeSessions: sessionsForTargeting,
+  });
+
+  for (const targetSession of sessionsToMessage) {
+    await currentDeps.sendClientMessage(targetSession.id, message);
   }
 };
 

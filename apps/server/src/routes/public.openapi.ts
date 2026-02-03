@@ -151,7 +151,12 @@ const Stream = z
     userThumb: z
       .string()
       .nullable()
-      .openapi({ description: 'User avatar URL', example: 'https://plex.tv/users/abc123/avatar' }),
+      .openapi({ description: 'User avatar path from media server', example: '/photo/abc123' }),
+    userAvatarUrl: z.string().nullable().openapi({
+      description: 'Proxied avatar URL (relative)',
+      example:
+        '/api/v1/images/proxy?server=550e8400-e29b-41d4-a716-446655440000&url=/photo/abc123&width=100&height=100&fallback=avatar',
+    }),
     // Media info
     mediaTitle: z.string().openapi({ example: 'Inception' }),
     mediaType: z.enum(['movie', 'episode', 'track', 'live', 'photo', 'unknown']),
@@ -166,6 +171,11 @@ const Stream = z
       .string()
       .nullable()
       .openapi({ description: 'Media thumbnail path', example: '/library/metadata/12345/thumb' }),
+    posterUrl: z.string().nullable().openapi({
+      description: 'Proxied poster URL (relative)',
+      example:
+        '/api/v1/images/proxy?server=550e8400-e29b-41d4-a716-446655440000&url=/library/metadata/12345/thumb&width=300&height=450&fallback=poster',
+    }),
     durationMs: z
       .number()
       .int()
@@ -315,6 +325,15 @@ const User = z
     id: z.uuid(),
     username: z.string().openapi({ example: 'john_doe' }),
     displayName: z.string().openapi({ example: 'John Doe' }),
+    thumbUrl: z
+      .string()
+      .nullable()
+      .openapi({ description: 'User avatar path from media server', example: '/photo/abc123' }),
+    avatarUrl: z.string().nullable().openapi({
+      description: 'Proxied avatar URL (relative)',
+      example:
+        '/api/v1/images/proxy?server=550e8400-e29b-41d4-a716-446655440000&url=/photo/abc123&width=100&height=100&fallback=avatar',
+    }),
     role: z.enum(['owner', 'admin', 'viewer', 'member', 'disabled', 'pending']),
     trustScore: z.number().int().openapi({ description: '0-100 trust score', example: 95 }),
     totalViolations: z.number().int().openapi({ example: 2 }),
@@ -386,6 +405,11 @@ const Violation = z
     user: z.object({
       id: z.uuid(),
       username: z.string(),
+      thumbUrl: z
+        .string()
+        .nullable()
+        .openapi({ description: 'User avatar path from media server' }),
+      avatarUrl: z.string().nullable().openapi({ description: 'Proxied avatar URL (relative)' }),
     }),
   })
   .openapi('Violation');
@@ -456,6 +480,11 @@ const SessionHistory = z
     seasonNumber: z.number().int().nullable().openapi({ example: 5 }),
     episodeNumber: z.number().int().nullable().openapi({ example: 16 }),
     year: z.number().int().nullable().openapi({ example: 2010 }),
+    thumbPath: z
+      .string()
+      .nullable()
+      .openapi({ description: 'Media thumbnail path', example: '/library/metadata/12345/thumb' }),
+    posterUrl: z.string().nullable().openapi({ description: 'Proxied poster URL (relative)' }),
     durationMs: z.number().int().nullable().openapi({ description: 'Watch duration in ms' }),
     progressMs: z.number().int().nullable().openapi({ description: 'Playback position in ms' }),
     startedAt: z.iso.datetime(),
@@ -465,6 +494,11 @@ const SessionHistory = z
     user: z.object({
       id: z.uuid(),
       username: z.string(),
+      thumbUrl: z
+        .string()
+        .nullable()
+        .openapi({ description: 'User avatar path from media server' }),
+      avatarUrl: z.string().nullable().openapi({ description: 'Proxied avatar URL (relative)' }),
     }),
   })
   .openapi('SessionHistory');

@@ -87,10 +87,9 @@ export function createActionExecutorDeps(redis: Redis): ActionExecutorDeps {
      * Send notification via the notification queue.
      * Uses dynamic import to avoid circular dependency.
      *
-     * Note: The V2 notify action specifies channels, but the notification queue
-     * routes based on event type and respects global settings. The channels
-     * preference is stored in violation.data for future use when direct channel
-     * routing is implemented.
+     * The V2 notify action specifies channels directly (e.g., ['webhook', 'push']).
+     * These are passed to the notification queue which sends to those channels
+     * without applying the global channel routing rules.
      */
     sendNotification: async (params) => {
       // Dynamic import to avoid circular dependencies
@@ -192,7 +191,7 @@ export function createActionExecutorDeps(redis: Redis): ActionExecutorDeps {
     /**
      * Terminate a session using the termination service.
      */
-    terminateSession: async (sessionId, serverId, delay) => {
+    terminateSession: async (sessionId, serverId, delay, message) => {
       // Dynamic import to avoid circular dependency
       const { terminateSession: terminate } = await import('../termination.js');
 
@@ -208,14 +207,14 @@ export function createActionExecutorDeps(redis: Redis): ActionExecutorDeps {
       const result = await terminate({
         sessionId,
         trigger: 'rule',
-        reason: 'Terminated by rule action',
+        reason: message,
       });
 
       if (!result.success) {
         throw new Error(result.error ?? 'Failed to terminate session');
       }
 
-      rulesLogger.info('Session terminated', { sessionId, serverId });
+      rulesLogger.info('Session terminated', { sessionId, serverId, message });
     },
 
     /**

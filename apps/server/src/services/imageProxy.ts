@@ -285,3 +285,147 @@ export function getGravatarUrl(email: string | null | undefined, size: number = 
   const hash = createHash('md5').update(email.toLowerCase().trim()).digest('hex');
   return `https://www.gravatar.com/avatar/${hash}?s=${size}&d=mp`;
 }
+
+// ============================================================================
+// External URL Construction
+// ============================================================================
+
+/**
+ * Size presets optimized for different use cases.
+ * Push notifications use smaller images to reduce bandwidth and load faster.
+ * API responses use standard sizes for flexibility.
+ */
+export const IMAGE_SIZES = {
+  // Push notification sizes (smaller for fast loading)
+  pushPoster: { width: 200, height: 300 },
+  pushAvatar: { width: 80, height: 80 },
+  pushLogo: { width: 128, height: 128 },
+
+  // API response sizes (standard)
+  apiPoster: { width: 300, height: 450 },
+  apiPosterSmall: { width: 150, height: 225 },
+  apiAvatar: { width: 100, height: 100 },
+  apiArt: { width: 500, height: 280 },
+} as const;
+
+export interface ProxyUrlOptions {
+  serverId: string;
+  path: string;
+  width?: number;
+  height?: number;
+  fallback?: FallbackType;
+}
+
+/**
+ * Build a relative proxy URL for use in API responses.
+ * Callers can prepend their known base URL.
+ */
+export function buildProxyUrl(options: ProxyUrlOptions): string {
+  const { serverId, path, width = 300, height = 450, fallback = 'poster' } = options;
+  const params = new URLSearchParams({
+    server: serverId,
+    url: path,
+    width: String(width),
+    height: String(height),
+    fallback,
+  });
+  return `/api/v1/images/proxy?${params}`;
+}
+
+/**
+ * Build an absolute proxy URL for push notifications.
+ * Returns null if baseUrl is not configured or path is missing.
+ */
+export function buildAbsoluteProxyUrl(
+  baseUrl: string | null | undefined,
+  options: ProxyUrlOptions
+): string | null {
+  if (!baseUrl || !options.path) return null;
+  return `${baseUrl.replace(/\/$/, '')}${buildProxyUrl(options)}`;
+}
+
+/**
+ * Build a poster URL for API responses (relative).
+ */
+export function buildPosterUrl(
+  serverId: string | null | undefined,
+  thumbPath: string | null | undefined,
+  size: 'standard' | 'small' = 'standard'
+): string | null {
+  if (!serverId || !thumbPath) return null;
+  const dimensions = size === 'small' ? IMAGE_SIZES.apiPosterSmall : IMAGE_SIZES.apiPoster;
+  return buildProxyUrl({
+    serverId,
+    path: thumbPath,
+    ...dimensions,
+    fallback: 'poster',
+  });
+}
+
+/**
+ * Build an avatar URL for API responses (relative).
+ * Returns the URL as-is if it's already an absolute URL (e.g., from Plex.tv).
+ */
+export function buildAvatarUrl(
+  serverId: string | null | undefined,
+  thumbUrl: string | null | undefined,
+  size: number = IMAGE_SIZES.apiAvatar.width
+): string | null {
+  if (!thumbUrl) return null;
+  // Direct links (e.g., from Plex.tv) are already absolute
+  if (thumbUrl.startsWith('http')) return thumbUrl;
+  if (!serverId) return null;
+  return buildProxyUrl({
+    serverId,
+    path: thumbUrl,
+    width: size,
+    height: size,
+    fallback: 'avatar',
+  });
+}
+
+/**
+ * Build a poster URL for push notifications (absolute).
+ */
+export function buildPushPosterUrl(
+  baseUrl: string | null | undefined,
+  serverId: string | null | undefined,
+  thumbPath: string | null | undefined
+): string | null {
+  if (!serverId || !thumbPath) return null;
+  return buildAbsoluteProxyUrl(baseUrl, {
+    serverId,
+    path: thumbPath,
+    ...IMAGE_SIZES.pushPoster,
+    fallback: 'poster',
+  });
+}
+
+/**
+ * Build an avatar URL for push notifications (absolute).
+ * Returns the URL as-is if it's already an absolute URL.
+ */
+export function buildPushAvatarUrl(
+  baseUrl: string | null | undefined,
+  serverId: string | null | undefined,
+  thumbUrl: string | null | undefined
+): string | null {
+  if (!thumbUrl) return null;
+  // Direct links are already absolute
+  if (thumbUrl.startsWith('http')) return thumbUrl;
+  if (!serverId) return null;
+  return buildAbsoluteProxyUrl(baseUrl, {
+    serverId,
+    path: thumbUrl,
+    ...IMAGE_SIZES.pushAvatar,
+    fallback: 'avatar',
+  });
+}
+
+/**
+ * Build the static logo URL for push notifications.
+ */
+export function buildLogoUrl(baseUrl: string | null | undefined): string | null {
+  if (!baseUrl) return null;
+  return `${baseUrl.replace(/\/$/, '')}/api/v1/images/logo`;
+}

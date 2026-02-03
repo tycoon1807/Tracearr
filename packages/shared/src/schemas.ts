@@ -332,6 +332,13 @@ export const streamQualityFieldSchema = z.enum([
   'source_bitrate_mbps',
 ]);
 
+export const transcodingConditionValueSchema = z.enum([
+  'video',
+  'audio',
+  'video_or_audio',
+  'neither',
+]);
+
 export const userAttributeFieldSchema = z.enum(['user_id', 'trust_score', 'account_age_days']);
 
 export const deviceClientFieldSchema = z.enum(['device_type', 'client_name', 'platform']);
@@ -451,16 +458,30 @@ export const resetTrustActionSchema = z.object({
   type: z.literal('reset_trust'),
 });
 
+export const sessionTargetSchema = z.enum([
+  'triggering',
+  'oldest',
+  'newest',
+  'all_except_one',
+  'all_user',
+]);
+
+export type SessionTarget = z.infer<typeof sessionTargetSchema>;
+
 export const killStreamActionSchema = z.object({
   type: z.literal('kill_stream'),
   delay_seconds: z.number().int().min(0).max(300).optional(),
   require_confirmation: z.boolean().optional(),
   cooldown_minutes: z.number().int().positive().optional(),
+  /** Message to display to user before termination. If omitted, terminates silently. */
+  message: z.string().min(1).max(500).optional(),
+  target: sessionTargetSchema.optional(),
 });
 
 export const messageClientActionSchema = z.object({
   type: z.literal('message_client'),
   message: z.string().min(1).max(500),
+  target: sessionTargetSchema.optional(),
 });
 
 // Union of all actions

@@ -362,7 +362,7 @@ describe('Action Executor Registry', () => {
     });
 
     describe('kill_stream', () => {
-      it('should terminate session', async () => {
+      it('should terminate session silently when no message provided', async () => {
         const context = createMockContext();
         const action: KillStreamAction = { type: 'kill_stream' };
 
@@ -372,7 +372,8 @@ describe('Action Executor Registry', () => {
         expect(mockDeps.terminateSession).toHaveBeenCalledWith(
           context.session.id,
           context.server.id,
-          0
+          0,
+          undefined
         );
       });
 
@@ -385,8 +386,174 @@ describe('Action Executor Registry', () => {
         expect(mockDeps.terminateSession).toHaveBeenCalledWith(
           context.session.id,
           context.server.id,
-          30
+          30,
+          undefined
         );
+      });
+
+      it('should terminate session with custom message', async () => {
+        const context = createMockContext();
+        const action: KillStreamAction = {
+          type: 'kill_stream',
+          message: 'You violated the concurrent streams policy',
+        };
+
+        const result = await executeAction(context, action);
+
+        expect(result.success).toBe(true);
+        expect(mockDeps.terminateSession).toHaveBeenCalledWith(
+          context.session.id,
+          context.server.id,
+          0,
+          'You violated the concurrent streams policy'
+        );
+      });
+
+      it('should terminate session with delay and message', async () => {
+        const context = createMockContext();
+        const action: KillStreamAction = {
+          type: 'kill_stream',
+          delay_seconds: 15,
+          message: 'Stream will be terminated in 15 seconds',
+        };
+
+        await executeAction(context, action);
+
+        expect(mockDeps.terminateSession).toHaveBeenCalledWith(
+          context.session.id,
+          context.server.id,
+          15,
+          'Stream will be terminated in 15 seconds'
+        );
+      });
+
+      describe('with targeting', () => {
+        it('should terminate only triggering session by default', async () => {
+          const triggeringSession = createMockSession({ id: 'triggering' });
+          const otherSession = createMockSession({
+            id: 'other',
+            serverUserId: triggeringSession.serverUserId,
+            startedAt: new Date(Date.now() - 60000),
+          });
+          const context = createMockContext({
+            session: triggeringSession,
+            activeSessions: [otherSession, triggeringSession],
+          });
+          const action: KillStreamAction = { type: 'kill_stream' };
+
+          await executeAction(context, action);
+
+          expect(mockDeps.terminateSession).toHaveBeenCalledTimes(1);
+          expect(mockDeps.terminateSession).toHaveBeenCalledWith(
+            'triggering',
+            context.server.id,
+            0,
+            undefined
+          );
+        });
+
+        it('should terminate oldest session when target is oldest', async () => {
+          const oldestSession = createMockSession({
+            id: 'oldest',
+            serverUserId: 'user-1',
+            startedAt: new Date('2024-01-01T08:00:00Z'),
+          });
+          const newestSession = createMockSession({
+            id: 'newest',
+            serverUserId: 'user-1',
+            startedAt: new Date('2024-01-01T10:00:00Z'),
+          });
+          const context = createMockContext({
+            session: newestSession,
+            serverUser: createMockServerUser({ id: 'user-1' }),
+            activeSessions: [oldestSession, newestSession],
+          });
+          const action: KillStreamAction = { type: 'kill_stream', target: 'oldest' };
+
+          await executeAction(context, action);
+
+          expect(mockDeps.terminateSession).toHaveBeenCalledTimes(1);
+          expect(mockDeps.terminateSession).toHaveBeenCalledWith(
+            'oldest',
+            context.server.id,
+            0,
+            undefined
+          );
+        });
+
+        it('should terminate all except oldest when target is all_except_one', async () => {
+          const session1 = createMockSession({
+            id: 's1',
+            serverUserId: 'user-1',
+            startedAt: new Date('2024-01-01T08:00:00Z'),
+          });
+          const session2 = createMockSession({
+            id: 's2',
+            serverUserId: 'user-1',
+            startedAt: new Date('2024-01-01T09:00:00Z'),
+          });
+          const session3 = createMockSession({
+            id: 's3',
+            serverUserId: 'user-1',
+            startedAt: new Date('2024-01-01T10:00:00Z'),
+          });
+          const context = createMockContext({
+            session: session3,
+            serverUser: createMockServerUser({ id: 'user-1' }),
+            activeSessions: [session1, session2, session3],
+          });
+          const action: KillStreamAction = { type: 'kill_stream', target: 'all_except_one' };
+
+          await executeAction(context, action);
+
+          expect(mockDeps.terminateSession).toHaveBeenCalledTimes(2);
+          expect(mockDeps.terminateSession).toHaveBeenCalledWith(
+            's2',
+            context.server.id,
+            0,
+            undefined
+          );
+          expect(mockDeps.terminateSession).toHaveBeenCalledWith(
+            's3',
+            context.server.id,
+            0,
+            undefined
+          );
+        });
+
+        it('should terminate all user sessions when target is all_user', async () => {
+          const session1 = createMockSession({ id: 's1', serverUserId: 'user-1' });
+          const session2 = createMockSession({ id: 's2', serverUserId: 'user-1' });
+          const otherUserSession = createMockSession({ id: 'other', serverUserId: 'user-2' });
+          const context = createMockContext({
+            session: session1,
+            serverUser: createMockServerUser({ id: 'user-1' }),
+            activeSessions: [session1, session2, otherUserSession],
+          });
+          const action: KillStreamAction = { type: 'kill_stream', target: 'all_user' };
+
+          await executeAction(context, action);
+
+          expect(mockDeps.terminateSession).toHaveBeenCalledTimes(2);
+          expect(mockDeps.terminateSession).toHaveBeenCalledWith(
+            's1',
+            context.server.id,
+            0,
+            undefined
+          );
+          expect(mockDeps.terminateSession).toHaveBeenCalledWith(
+            's2',
+            context.server.id,
+            0,
+            undefined
+          );
+          expect(mockDeps.terminateSession).not.toHaveBeenCalledWith(
+            'other',
+            expect.anything(),
+            expect.anything(),
+            expect.anything()
+          );
+        });
       });
     });
 
@@ -408,6 +575,29 @@ describe('Action Executor Registry', () => {
         await executeAction(context, action);
 
         expect(mockDeps.sendClientMessage).not.toHaveBeenCalled();
+      });
+
+      describe('with targeting', () => {
+        it('should message all user sessions when target is all_user', async () => {
+          const session1 = createMockSession({ id: 's1', serverUserId: 'user-1' });
+          const session2 = createMockSession({ id: 's2', serverUserId: 'user-1' });
+          const context = createMockContext({
+            session: session1,
+            serverUser: createMockServerUser({ id: 'user-1' }),
+            activeSessions: [session1, session2],
+          });
+          const action: MessageClientAction = {
+            type: 'message_client',
+            message: 'Warning!',
+            target: 'all_user',
+          };
+
+          await executeAction(context, action);
+
+          expect(mockDeps.sendClientMessage).toHaveBeenCalledTimes(2);
+          expect(mockDeps.sendClientMessage).toHaveBeenCalledWith('s1', 'Warning!');
+          expect(mockDeps.sendClientMessage).toHaveBeenCalledWith('s2', 'Warning!');
+        });
       });
     });
 
